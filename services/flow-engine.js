@@ -9,6 +9,7 @@
  */
 import { readMeta } from './team-service.js';
 import { runRoundTable } from './round-table-flow.js';
+import { runPipeline } from './pipeline-flow.js';
 
 /**
  * Run a Team Run under its declared flow. Returns when the run reaches a
@@ -35,7 +36,7 @@ export async function run(runId, ctx = null) {
     case 'handoff-round-table':
       return runRoundTable(runId, meta, ctx);
     case 'pipeline-with-feedback':
-      throw new Error('flow-engine: pipeline-with-feedback is P2 (not in v1.0)');
+      return runPipeline(runId, meta, ctx);
     case 'fan-out-collect':
       throw new Error('flow-engine: fan-out-collect is P3 (not in v1.0)');
     default:

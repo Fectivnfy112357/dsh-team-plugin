@@ -35,7 +35,7 @@ async function importService(rel) {
 
 try {
   // ---- paths.js ----
-  console.log('[1/9] paths.js');
+  console.log('[1/12] paths.js');
   const { resolveTeamPaths, runDir } = await importService('services/paths.js');
   const paths = resolveTeamPaths();
   paths.teamRunsDir === join(tmp, '.dsh', 'team-runs')
@@ -46,7 +46,7 @@ try {
     : bad(`globalRoot = ${paths.globalRoot}`);
 
   // ---- log-writer.js ----
-  console.log('\n[2/9] log-writer.js');
+  console.log('\n[2/12] log-writer.js');
   const { appendLog, writeJsonFile } = await importService('services/log-writer.js');
   // Pre-create run dir so appendLog can find it (service normally ensures this)
   const runId0 = 'smoke-pre';
@@ -72,7 +72,7 @@ try {
   allValid ? ok('all 20 entries parse and have unique ids') : bad('overwrite or invalid JSON detected');
 
   // ---- team-service.js: happy path + illegal transition ----
-  console.log('\n[3/9] team-service.js');
+  console.log('\n[3/12] team-service.js');
   const ts = await importService('services/team-service.js');
   const meta = await ts.start({
     taskDescription: 'smoke test',
@@ -129,7 +129,7 @@ try {
     : bad(`state-history reasons = ${histReasons}`);
 
   // ---- reconcileOnBoot ----
-  console.log('\n[4/9] reconcileOnBoot');
+  console.log('\n[4/12] reconcileOnBoot');
   // Create a second run that pretends to be held by a different (dead) process
   const orphanMeta = await ts.start({
     taskDescription: 'orphan test',
@@ -148,7 +148,7 @@ try {
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
 
   // ---- 5. DecisionPointService ----
-  console.log('\n[5/9] DecisionPointService');
+  console.log('\n[5/12] DecisionPointService');
   const dpSvc = await importService('services/decision-point-service.js');
   dpSvc._resetForTests();
   // Create a run + members so the DP has context
@@ -188,7 +188,7 @@ try {
   dpSvc.waitingDecisions(dpRunId).length === 0 ? ok('waitingDecisions() empty after respond') : bad('still has open DP');
 
   // ---- 6. MessageService ----
-  console.log('\n[6/9] MessageService');
+  console.log('\n[6/12] MessageService');
   const msgSvc = await importService('services/message-service.js');
   msgSvc._resetForTests();
   const sentMsg = await msgSvc.send({
@@ -219,7 +219,7 @@ try {
     : bad('wake dedup blocks unrelated target');
 
   // ---- 7. RoundTableFlow ----
-  console.log('\n[7/9] RoundTableFlow');
+  console.log('\n[7/12] RoundTableFlow');
   const flowSvc = await importService('services/flow-engine.js');
   const rtRunMeta = await ts.start({
     taskDescription: 'round-table test',
@@ -260,7 +260,7 @@ try {
   finalMeta.state === 'succeeded' ? ok('meta.state=succeeded after flow') : bad(`state=${finalMeta.state}`);
 
   // ---- 8. setDegraded ----
-  console.log('\n[8/9] setDegraded');
+  console.log('\n[8/12] setDegraded');
   const degRunMeta = await ts.start({
     taskDescription: 'degraded test',
     flow: 'handoff-round-table',
@@ -282,7 +282,7 @@ try {
     : bad('degraded-flag-set reason not in state-history');
 
   // ---- 9. UI components ----
-  console.log('\n[9/9] UI components');
+  console.log('\n[9/12] UI components');
   // 9a) Each component module loads and exports a function
   const { TeamMemberChip } = await importService('ui/team-member-chip.js');
   const { TeamDecisionBadge } = await importService('ui/team-decision-badge.js');
@@ -339,6 +339,104 @@ try {
   empty && empty.type === 'div' && /No active Team Run/.test(emptyChildren)
     ? ok('TeamPanel empty state shows the hint')
     : bad(`emptyChildren=${emptyChildren}`);
+
+  // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
+  console.log('\n[10/12] PipelineFlow (happy path)');
+  const pipeSvc = await importService('services/pipeline-flow.js');
+  pipeSvc._resetForTests();
+  const pipeMeta = await ts.start({
+    taskDescription: 'pipeline test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write the doc', max_retries: 1, intent: 'produce' },
+        { member_id: 'editor', task: 'edit the doc', max_retries: 0, intent: 'review' },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const pipeRunId = pipeMeta.id;
+  await ts.markHolder(pipeRunId);
+  await ts.transition(pipeRunId, 'pending', 'assembling', 'team-formed');
+  // Kick off the flow; the in-memory step waiter blocks until signal.
+  const pipePromise = flowSvc.run(pipeRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  // Step 0 -> complete with an artifact
+  pipeSvc.signalStepTerminal(pipeRunId, 0, 'complete', { produced_artifact_ids: ['doc-v1'] });
+  await new Promise((r) => setTimeout(r, 50));
+  // Step 1 -> complete
+  pipeSvc.signalStepTerminal(pipeRunId, 1, 'complete', { produced_artifact_ids: ['doc-v2'] });
+  const pipeResult = await pipePromise;
+  pipeResult.terminal === 'succeeded'
+    ? ok('happy path: 2-step pipeline -> succeeded')
+    : bad(`terminal=${pipeResult.terminal}`);
+  const pipeFinalMeta = await ts.readMeta(pipeRunId);
+  pipeFinalMeta.state === 'succeeded' ? ok('pipeline meta.state=succeeded') : bad(`state=${pipeFinalMeta.state}`);
+  // handoff-log has 4 entries: start0, complete0, start1, complete1
+  const hlLines = readFileSync(join(paths.teamRunsDir, pipeRunId, 'handoff-log.jsonl'), 'utf-8').trim().split('\n');
+  hlLines.length === 4 ? ok('handoff-log has 4 entries (start+complete per step)') : bad(`handoff-log len=${hlLines.length}`);
+  // dispatch-log has 2 entries (DSH -> writer, DSH -> editor)
+  const dlLines = readFileSync(join(paths.teamRunsDir, pipeRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n');
+  // 2 dispatches + 2 markTerminal appends = 4 lines
+  dlLines.length === 4 ? ok('dispatch-log has 4 entries (2 dispatches + 2 markTerminal)') : bad(`dispatch-log len=${dlLines.length}`);
+
+  // ---- 11. PipelineFlow: step 0 fails, retry with feedback, then succeeds ----
+  console.log('\n[11/12] PipelineFlow (feedback loop)');
+  pipeSvc._resetForTests();
+  const fbMeta = await ts.start({
+    taskDescription: 'pipeline feedback test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write the doc', max_retries: 1, intent: 'produce' },
+      ],
+    },
+    members: [{ member_id: 'writer', instance_alias: 'w' }],
+  });
+  const fbRunId = fbMeta.id;
+  await ts.markHolder(fbRunId);
+  await ts.transition(fbRunId, 'pending', 'assembling', 'team-formed');
+  const fbPromise = flowSvc.run(fbRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  // First attempt: fail with feedback
+  pipeSvc.signalStepTerminal(fbRunId, 0, 'fail', { feedback: 'add more detail on section 2' });
+  await new Promise((r) => setTimeout(r, 50));
+  // Second attempt: complete
+  pipeSvc.signalStepTerminal(fbRunId, 0, 'complete', { produced_artifact_ids: ['doc-v2'] });
+  const fbResult = await fbPromise;
+  fbResult.terminal === 'succeeded'
+    ? ok('feedback loop: fail then retry -> succeeded')
+    : bad(`terminal=${fbResult.terminal}`);
+  // handoff-log: 1 start + 1 fail-handoff + 1 second start + 1 complete-handoff = 4 entries
+  const fbHlLines = readFileSync(join(paths.teamRunsDir, fbRunId, 'handoff-log.jsonl'), 'utf-8').trim().split('\n');
+  fbHlLines.length === 4 ? ok('feedback loop handoff-log has 4 entries') : bad(`fb handoff-log len=${fbHlLines.length}`);
+
+  // ---- 12. PipelineFlow: max_retries=0, fail -> failed terminal ----
+  console.log('\n[12/12] PipelineFlow (no retries)');
+  pipeSvc._resetForTests();
+  const noMeta = await ts.start({
+    taskDescription: 'pipeline no-retry test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write the doc', max_retries: 0, intent: 'produce' },
+      ],
+    },
+    members: [{ member_id: 'writer', instance_alias: 'w' }],
+  });
+  const noRunId = noMeta.id;
+  await ts.markHolder(noRunId);
+  await ts.transition(noRunId, 'pending', 'assembling', 'team-formed');
+  const noPromise = flowSvc.run(noRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  pipeSvc.signalStepTerminal(noRunId, 0, 'fail', { feedback: 'unsalvageable' });
+  const noResult = await noPromise;
+  noResult.terminal === 'failed' ? ok('max_retries=0 + fail -> failed') : bad(`terminal=${noResult.terminal}`);
+  const noFinalMeta = await ts.readMeta(noRunId);
+  noFinalMeta.state === 'failed' ? ok('no-retry meta.state=failed') : bad(`state=${noFinalMeta.state}`);
 
   console.log('');
   if (fail === 0) {
