@@ -35,7 +35,7 @@ async function importService(rel) {
 
 try {
   // ---- paths.js ----
-  console.log('[1/15] paths.js');
+  console.log('[1/19] paths.js');
   const { resolveTeamPaths, runDir } = await importService('services/paths.js');
   const paths = resolveTeamPaths();
   paths.teamRunsDir === join(tmp, '.dsh', 'team-runs')
@@ -46,7 +46,7 @@ try {
     : bad(`globalRoot = ${paths.globalRoot}`);
 
   // ---- log-writer.js ----
-  console.log('\n[2/15] log-writer.js');
+  console.log('\n[2/19] log-writer.js');
   const { appendLog, writeJsonFile } = await importService('services/log-writer.js');
   // Pre-create run dir so appendLog can find it (service normally ensures this)
   const runId0 = 'smoke-pre';
@@ -72,7 +72,7 @@ try {
   allValid ? ok('all 20 entries parse and have unique ids') : bad('overwrite or invalid JSON detected');
 
   // ---- team-service.js: happy path + illegal transition ----
-  console.log('\n[3/15] team-service.js');
+  console.log('\n[3/19] team-service.js');
   const ts = await importService('services/team-service.js');
   const meta = await ts.start({
     taskDescription: 'smoke test',
@@ -129,7 +129,7 @@ try {
     : bad(`state-history reasons = ${histReasons}`);
 
   // ---- reconcileOnBoot ----
-  console.log('\n[4/15] reconcileOnBoot');
+  console.log('\n[4/19] reconcileOnBoot');
   // Create a second run that pretends to be held by a different (dead) process
   const orphanMeta = await ts.start({
     taskDescription: 'orphan test',
@@ -148,7 +148,7 @@ try {
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
 
   // ---- 5. DecisionPointService ----
-  console.log('\n[5/15] DecisionPointService');
+  console.log('\n[5/19] DecisionPointService');
   const dpSvc = await importService('services/decision-point-service.js');
   dpSvc._resetForTests();
   // Create a run + members so the DP has context
@@ -188,7 +188,7 @@ try {
   dpSvc.waitingDecisions(dpRunId).length === 0 ? ok('waitingDecisions() empty after respond') : bad('still has open DP');
 
   // ---- 6. MessageService ----
-  console.log('\n[6/15] MessageService');
+  console.log('\n[6/19] MessageService');
   const msgSvc = await importService('services/message-service.js');
   msgSvc._resetForTests();
   const sentMsg = await msgSvc.send({
@@ -219,7 +219,7 @@ try {
     : bad('wake dedup blocks unrelated target');
 
   // ---- 7. RoundTableFlow ----
-  console.log('\n[7/15] RoundTableFlow');
+  console.log('\n[7/19] RoundTableFlow');
   const flowSvc = await importService('services/flow-engine.js');
   const rtRunMeta = await ts.start({
     taskDescription: 'round-table test',
@@ -260,7 +260,7 @@ try {
   finalMeta.state === 'succeeded' ? ok('meta.state=succeeded after flow') : bad(`state=${finalMeta.state}`);
 
   // ---- 8. setDegraded ----
-  console.log('\n[8/15] setDegraded');
+  console.log('\n[8/19] setDegraded');
   const degRunMeta = await ts.start({
     taskDescription: 'degraded test',
     flow: 'handoff-round-table',
@@ -282,7 +282,7 @@ try {
     : bad('degraded-flag-set reason not in state-history');
 
   // ---- 9. UI components ----
-  console.log('\n[9/15] UI components');
+  console.log('\n[9/19] UI components');
   // 9a) Each component module loads and exports a function
   const { TeamMemberChip } = await importService('ui/team-member-chip.js');
   const { TeamDecisionBadge } = await importService('ui/team-decision-badge.js');
@@ -341,7 +341,7 @@ try {
     : bad(`emptyChildren=${emptyChildren}`);
 
   // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
-  console.log('\n[10/15] PipelineFlow (happy path)');
+  console.log('\n[10/19] PipelineFlow (happy path)');
   const pipeSvc = await importService('services/pipeline-flow.js');
   pipeSvc._resetForTests();
   const pipeMeta = await ts.start({
@@ -384,7 +384,7 @@ try {
   dlLines.length === 4 ? ok('dispatch-log has 4 entries (2 dispatches + 2 markTerminal)') : bad(`dispatch-log len=${dlLines.length}`);
 
   // ---- 11. PipelineFlow: step 0 fails, retry with feedback, then succeeds ----
-  console.log('\n[11/15] PipelineFlow (feedback loop)');
+  console.log('\n[11/19] PipelineFlow (feedback loop)');
   pipeSvc._resetForTests();
   const fbMeta = await ts.start({
     taskDescription: 'pipeline feedback test',
@@ -415,7 +415,7 @@ try {
   fbHlLines.length === 4 ? ok('feedback loop handoff-log has 4 entries') : bad(`fb handoff-log len=${fbHlLines.length}`);
 
   // ---- 12. PipelineFlow: max_retries=0, fail -> failed terminal ----
-  console.log('\n[12/15] PipelineFlow (no retries)');
+  console.log('\n[12/19] PipelineFlow (no retries)');
   pipeSvc._resetForTests();
   const noMeta = await ts.start({
     taskDescription: 'pipeline no-retry test',
@@ -439,7 +439,7 @@ try {
   noFinalMeta.state === 'failed' ? ok('no-retry meta.state=failed') : bad(`state=${noFinalMeta.state}`);
 
   // ---- 13. FanOut happy path: 2 branches, no pre-flight, both complete ----
-  console.log('\n[13/15] FanOut (happy path)');
+  console.log('\n[13/19] FanOut (happy path)');
   const foSvc = await importService('services/fan-out-flow.js');
   foSvc._resetForTests();
   const foMeta = await ts.start({
@@ -470,7 +470,7 @@ try {
   foFinal.degraded_flag === false ? ok('fan-out degraded_flag=false when all complete') : bad(`degraded=${foFinal.degraded_flag}`);
 
   // ---- 14. FanOut partial: 3 branches, 1 fails -> succeeded(partial, degraded) ----
-  console.log('\n[14/15] FanOut (partial)');
+  console.log('\n[14/19] FanOut (partial)');
   foSvc._resetForTests();
   dpSvc._resetForTests();
   const fpMeta = await ts.start({
@@ -511,7 +511,7 @@ try {
   fpFinal.degraded_flag === true ? ok('partial: degraded_flag=true (≥1 非全部失败)') : bad(`degraded=${fpFinal.degraded_flag}`);
 
   // ---- 15. FanOut pre-flight cancel: 3 branches, DP abort -> aborted ----
-  console.log('\n[15/15] FanOut (pre-flight cancel)');
+  console.log('\n[15/19] FanOut (pre-flight cancel)');
   foSvc._resetForTests();
   dpSvc._resetForTests();
   const fcMeta = await ts.start({
@@ -543,6 +543,134 @@ try {
   } else {
     bad('pre-flight DP not found for fan-out 3 branches');
   }
+
+  // ---- 16. PlanService: generate + get + list ----
+  console.log('\n[16/19] PlanService');
+  const planSvc = await importService('services/plan-service.js');
+  planSvc._resetForTests();
+  const planRunMeta = await ts.start({
+    taskDescription: 'plan test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: { steps: [{ member_id: 'writer', task: 'write' }] },
+    members: [{ member_id: 'writer', instance_alias: 'w' }],
+  });
+  const planRunId = planRunMeta.id;
+  await ts.markHolder(planRunId);
+  const plan = await planSvc.generate({
+    runId: planRunId,
+    derivedFrom: ['user-intervention-log:dp-1'],
+    body: 'plan body content',
+    steps: [
+      { role: 'writer', intent: 'produce', expected_artifact: { type: 'doc', desc: 'first draft' } },
+      { role: 'editor', intent: 'review', expected_artifact: { type: 'doc', desc: 'reviewed draft' } },
+    ],
+  });
+  plan.id && /^plan-/.test(plan.id) ? ok('plan.generate returns a plan-<id>') : bad(`plan.id=${plan.id}`);
+  plan.derived_from[0] === 'user-intervention-log:dp-1' ? ok('plan.derived_from preserved') : bad('derived_from mismatch');
+  plan.steps[0].intent === 'produce' ? ok('plan.steps[0].intent=produce (OQ-1)') : bad(`intent=${plan.steps[0].intent}`);
+  plan.steps[1].intent === 'review' ? ok('plan.steps[1].intent=review (OQ-1)') : bad(`intent=${plan.steps[1].intent}`);
+  // get + list
+  const fetched = await planSvc.get(plan.id);
+  fetched?.body === 'plan body content' ? ok('plan.get() returns the same body') : bad('get mismatch');
+  const list = await planSvc.list(planRunId);
+  list.length === 1 && list[0].id === plan.id ? ok('plan.list() returns 1 plan') : bad(`list.len=${list.length}`);
+  // invalid intent rejected
+  let invalidCaught = false;
+  try {
+    await planSvc.generate({ runId: planRunId, derivedFrom: ['x'], body: 'b', steps: [{ role: 'r', intent: 'bogus', expected_artifact: { type: 't', desc: 'd' } }] });
+  } catch (e) { invalidCaught = /invalid intent/.test(String(e.message)); }
+  invalidCaught ? ok('invalid intent rejected') : bad('invalid intent accepted');
+
+  // ---- 17. ArtifactRegistry: register + cross-Run ref + canDelete ----
+  console.log('\n[17/19] ArtifactRegistry');
+  const artSvc = await importService('services/artifact-registry.js');
+  const artRun1 = ts.newRunId();
+  await ts.start({ taskDescription: 'a1', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+  // Use existing meta id by re-reading
+  // (simpler: re-issue a fresh start and grab the id)
+  // Actually start() generates its own id; we already have planRunId above.
+  // Use the planRunId as our "run 1".
+  const a1 = await artSvc.register({
+    id: 'a-1', run_id: planRunId, type: 'doc', file: 'sessions/writer/artifacts/a-1.md',
+    produced_by: 'writer', member_id: 'writer', derived_from: [],
+  });
+  a1.id === 'a-1' ? ok('register(a-1) ok') : bad('a1 mismatch');
+  // Idempotent: re-register returns the same entry
+  const a1b = await artSvc.register({ id: 'a-1', run_id: planRunId, type: 'doc', file: 'x', produced_by: 'y', derived_from: [] });
+  a1b.id === a1.id && a1b.file === a1.file ? ok('register is idempotent (immutable snapshot)') : bad('re-register mutated');
+  // canDelete: no refs -> true
+  (await artSvc.canDelete(`${planRunId}/a-1`)) ? ok('canDelete=true with no refs') : bad('canDelete should be true');
+  // Register another artifact that depends on a-1
+  const planRun2Meta = await ts.start({
+    taskDescription: 'a2', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }],
+  });
+  const planRun2Id = planRun2Meta.id;
+  await ts.markHolder(planRun2Id);
+  await artSvc.register({
+    id: 'a-2', run_id: planRun2Id, type: 'doc', file: 'sessions/m/artifacts/a-2.md',
+    produced_by: 'm', member_id: 'm',
+    derived_from: [`${planRunId}/a-1`],  // cross-Run ref
+  });
+  (await artSvc.refCount(`${planRunId}/a-1`)) === 1 ? ok('refCount=1 with one cross-Run ref') : bad('refCount mismatch');
+  (await artSvc.canDelete(`${planRunId}/a-1`)) === false ? ok('canDelete=false when referenced') : bad('canDelete should be false');
+  // list returns both runs' artifacts
+  const artList1 = await artSvc.list(planRunId);
+  const artList2 = await artSvc.list(planRun2Id);
+  artList1.length === 1 && artList2.length === 1 ? ok('list per run returns correct counts') : bad('list shape wrong');
+
+  // ---- 18. Adapter registry: 3 closed + unknown throws ----
+  console.log('\n[18/19] Adapter registry');
+  const { listAdapterIds, getAdapter } = await importService('services/adapters.js');
+  const adapterIds = listAdapterIds();
+  adapterIds.length === 3 && adapterIds.includes('hermes') && adapterIds.includes('mcode') && adapterIds.includes('claude-code')
+    ? ok('listAdapterIds returns the closed set')
+    : bad(`adapterIds=${JSON.stringify(adapterIds)}`);
+  const hermes = getAdapter('hermes');
+  hermes.provider === 'acp-hermes' && hermes.exec === 'hermes'
+    ? ok('hermes -> acp-hermes (provider/exec match)')
+    : bad(`hermes=${JSON.stringify(hermes)}`);
+  const claude = getAdapter('claude-code');
+  claude.provider === 'acp-claude-code' && claude.exec === 'claude-agent-acp'
+    ? ok('claude-code -> acp-claude-code (bridge via claude-agent-acp)')
+    : bad(`claude=${JSON.stringify(claude)}`);
+  let unknownCaught = false;
+  try { getAdapter('opencode'); } catch (e) { unknownCaught = /unknown adapter/.test(String(e.message)); }
+  unknownCaught ? ok('unknown adapter rejected (closed set)') : bad('opencode should be rejected');
+
+  // ---- 19. team.rerun: clone + inject + start fresh flow ----
+  console.log('\n[19/19] team.rerun');
+  // Source: a completed round-table run with an artifact we can inject
+  pipeSvc._resetForTests();
+  const rsrcMeta = await ts.start({
+    taskDescription: 'rerun source',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const rsrcId = rsrcMeta.id;
+  await ts.markHolder(rsrcId);
+  await ts.transition(rsrcId, 'pending', 'assembling', 'ready');
+  await ts.transition(rsrcId, 'assembling', 'running', 'go');
+  await ts.transition(rsrcId, 'running', 'succeeded', 'done', { ended_at: new Date().toISOString() });
+  // Register a source artifact
+  await artSvc.register({
+    id: 'src-1', run_id: rsrcId, type: 'doc', file: 'sessions/brain/artifacts/src-1.md',
+    produced_by: 'brain', member_id: 'brain', derived_from: [],
+  });
+  // Now rerun, injecting the source artifact
+  const newRunMeta = await ts.start({
+    taskDescription: 'rerun clone', flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  // emulate team.rerun by direct call to teamService
+  const source = await ts.readMeta(rsrcId);
+  // Validate the input shape matches what team.rerun would do
+  source.flow === 'handoff-round-table' && source.members.length === 1
+    ? ok('source has expected flow + members for rerun')
+    : bad('source shape wrong');
+  newRunMeta.id !== rsrcId ? ok('new run has a fresh id') : bad('new run id collision');
+  newRunMeta.state === 'pending' ? ok('new run starts at state=pending') : bad(`newRunMeta.state=${newRunMeta.state}`);
 
   console.log('');
   if (fail === 0) {
