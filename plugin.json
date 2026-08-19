@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "dsh-team-plugin",
+  "version": "0.1.0",
+  "description": "DSH Team 插件 — 在 DSH WebUI 中以'角色 + 团队'的视角组织多个 Agent 协作。提供 /start-team 技能入口，按 handoff-round-table / pipeline-with-feedback / fan-out-collect 三种 flow 协调多 Agent。",
+  "license": "MIT",
+  "author": {
+    "name": "贾晓源 (Fectivnfy112357)"
+  },
+  "homepage": "https://github.com/Fectivnfy112357/dsh-agent-team",
+  "repository": "https://github.com/Fectivnfy112357/dsh-agent-team",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "dsh-plugin",
+    "plugin",
+    "agent-plugins",
+    "agent-skills",
+    "skills",
+    "dual-format",
+    "team",
+    "multi-agent",
+    "collaboration"
+  ]
+}

@@ -1,0 +1,2 @@
+# Force LF for all text files (avoids CRLF surprises on Windows).
+* text=auto eol=lf

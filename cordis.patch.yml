@@ -1,0 +1,10 @@
+# dsh-team-plugin dsh bundle patch: register the plugin at runtime.
+# Installed with: dsh plugin --profile <name> add <git-url|path|npm-name>
+# - insert: - id: <plugin-id>    (Cordis plugin id; ends with -skill is the
+#                                 convention used by the dsh-dual-plugin-guide
+#                                 scaffold but the actual id is arbitrary)
+#           name: '<package-name>'  (npm package name; Cordis resolves the
+#                                    installed module by this name)
+- insert:
+    - id: dsh-team-plugin-skill
+      name: 'dsh-team-plugin'
