@@ -1,0 +1,11 @@
+# 编辑器 / IDE
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# 临时 / 草稿
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

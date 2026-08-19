@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>DSH Team — Linear 风</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;510;590;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Linear design tokens */
+  :root {
+    --bg: #08090a;
+    --panel: #0f1011;
+    --surface: #191a1b;
+    --surface-2: #28282c;
+
+    --fg: #f7f8f8;
+    --fg-2: #d0d6e0;
+    --fg-3: #8a8f98;
+    --fg-4: #62666d;
+
+    --accent: #5e6ad2;
+    --accent-2: #7170ff;
+    --accent-3: #828fff;
+
+    --green: #27a644;
+    --green-2: #4ade80;
+    --orange: #fb923c;
+    --red: #f87171;
+    --mention: #f59e0b;
+    --handoff: #38bdf8;
+
+    --border: rgba(255,255,255,0.08);
+    --border-subtle: rgba(255,255,255,0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: 'cv01', 'ss03';
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    padding: 32px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page-head {
+    max-width: 1400px;
+    margin: 0 auto 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .page-title {
+    font-size: 24px;
+    font-weight: 510;
+    letter-spacing: -0.288px;
+    color: var(--fg);
+  }
+  .page-sub {
+    font-size: 13px;
+    color: var(--fg-3);
+    margin-top: 2px;
+  }
+
+  /* ===== App shell ===== */
+  .app {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+      rgba(0,0,0,0.2) 0px 0px 0px 1px,
+      rgba(0,0,0,0.4) 0px 8px 24px;
+  }
+
+  /* top bar */
+  .top-bar {
+    height: 44px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--panel);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px;
+    font-weight: 510;
+    color: var(--fg);
+    letter-spacing: -0.13px;
+  }
+  .brand-mark {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+  }
+  .top-meta {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px;
+    color: var(--fg-3);
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px 2px 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 510;
+    color: var(--fg-2);
+  }
+  .pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green-2);
+  }
+
+  /* layout */
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 640px;
+  }
+
+  /* sidebar */
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border-subtle);
+    padding: 14px 8px;
+  }
+  .sb-section {
+    margin-bottom: 18px;
+  }
+  .sb-label {
+    font-size: 11px;
+    font-weight: 510;
+    color: var(--fg-4);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 8px 6px;
+  }
+  .sb-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--fg-2);
+    cursor: pointer;
+  }
+  .sb-item:hover { background: rgba(255,255,255,0.04); color: var(--fg); }
+  .sb-item.active {
+    background: rgba(255,255,255,0.06);
+    color: var(--fg);
+  }
+  .sb-item .count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--fg-4);
+    font-feature-settings: 'tnum';
+  }
+
+  /* main */
+  .main { display: flex; flex-direction: column; }
+
+  /* team header */
+  .team-head {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .team-name {
+    font-size: 20px;
+    font-weight: 590;
+    letter-spacing: -0.24px;
+    color: var(--fg);
+  }
+  .team-sub {
+    font-size: 12px;
+    color: var(--fg-3);
+    margin-top: 2px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .team-sub .sep { color: var(--fg-4); }
+  .team-actions {
+    display: flex; gap: 6px;
+  }
+
+  /* btn */
+  .btn {
+    background: rgba(255,255,255,0.02);
+    color: var(--fg-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 510;
+    cursor: pointer;
+    box-shadow: rgba(0,0,0,0.03) 0px 1.2px 0px 0px;
+  }
+  .btn:hover { background: rgba(255,255,255,0.04); color: var(--fg); }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .btn-primary:hover { background: var(--accent-3); border-color: var(--accent-3); }
+
+  /* members bar */
+  .members {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    background: var(--bg);
+  }
+  .member {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 4px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    font-size: 12px;
+    color: var(--fg-2);
+  }
+  .member.busy { border-color: rgba(74,222,128,0.3); }
+  .member.idle { opacity: 0.55; }
+  .av {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 600;
+    color: white;
+    font-feature-settings: 'tnum';
+  }
+  .av-1 { background: linear-gradient(135deg, #a78bfa, #7c3aed); }
+  .av-2 { background: linear-gradient(135deg, #fb923c, #ea580c); }
+  .av-3 { background: linear-gradient(135deg, #4ade80, #16a34a); }
+  .av-4 { background: linear-gradient(135deg, #38bdf8, #0284c7); }
+  .av-5 { background: linear-gradient(135deg, #f472b6, #db2777); }
+  .member .state {
+    font-size: 10px;
+    color: var(--fg-3);
+    margin-left: 2px;
+  }
+  .member.busy .state { color: var(--green-2); }
+  .member .state::before {
+    content: '●';
+    margin-right: 3px;
+    font-size: 8px;
+  }
+  .member.idle .state::before { color: var(--fg-4); }
+  .member.busy .state::before { color: var(--green-2); }
+
+  /* timeline */
+  .timeline {
+    flex: 1;
+    padding: 18px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+    max-height: 520px;
+  }
+
+  /* chat bubble */
+  .msg {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .msg .body {
+    flex: 1;
+    min-width: 0;
+  }
+  .msg .who {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+    font-size: 12px;
+  }
+  .msg .who .name { font-weight: 510; color: var(--fg); }
+  .msg .who .time { color: var(--fg-4); font-size: 11px; font-feature-settings: 'tnum'; }
+  .msg .who .mention {
+    color: var(--mention);
+    font-size: 11px;
+    font-weight: 510;
+  }
+  .msg .text {
+    font-size: 13px;
+    color: var(--fg-2);
+    line-height: 1.55;
+  }
+  .msg-mention .body { border-left: 2px solid var(--mention); padding-left: 10px; }
+
+  /* handoff card — the signature element */
+  .handoff {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 2px 0;
+    box-shadow: rgba(0,0,0,0.2) 0px 0px 0px 1px inset;
+    position: relative;
+  }
+  .handoff .h-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .handoff .h-icon {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    color: white;
+    font-weight: 700;
+  }
+  .handoff .h-label {
+    font-size: 11px;
+    font-weight: 510;
+    color: var(--accent-2);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .handoff .h-round {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--fg-3);
+    font-feature-settings: 'tnum';
+  }
+  .handoff .h-flow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .handoff .h-flow .arrow { color: var(--fg-4); }
+  .handoff .h-task {
+    font-size: 12px;
+    color: var(--fg-2);
+    margin: 8px 0 6px;
+  }
+  .handoff .h-artifacts {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .artifact {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: rgba(94,106,210,0.1);
+    border: 1px solid rgba(94,106,210,0.25);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 510;
+    color: var(--accent-3);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  .artifact .icon { font-size: 10px; }
+
+  .handoff-return {
+    border-color: rgba(248,113,113,0.3);
+  }
+  .handoff-return .h-icon { background: var(--red); }
+  .handoff-return .h-label { color: var(--red); }
+
+  /* intervene bar */
+  .intervene {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    padding: 12px 24px;
+    background: var(--bg);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .intervene-btn {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    color: var(--fg-3);
+    padding: 6px 4px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 510;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .intervene-btn:hover {
+    background: rgba(255,255,255,0.06);
+    color: var(--fg);
+    border-color: var(--border);
+  }
+  .intervene-btn .icon {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+
+  /* footer status */
+  .footer-status {
+    padding: 8px 24px;
+    background: var(--bg);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--fg-4);
+  }
+  .footer-status .left { display: flex; align-items: center; gap: 12px; font-feature-settings: 'tnum'; }
+  .footer-status .key {
+    display: inline-block;
+    padding: 1px 5px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-3);
+    margin: 0 2px;
+  }
+
+  /* small utility */
+  .num { font-feature-settings: 'tnum'; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+  <div class="page-head">
+    <div>
+      <div class="page-title">DSH Team — 常驻面板 mockup</div>
+      <div class="page-sub">Linear 设计语言 · 单风格 · 一个 Team · Story 2 场景</div>
+    </div>
+    <div class="page-sub">inter / JetBrains Mono · cv01 ss03</div>
+  </div>
+
+  <div class="app">
+
+    <!-- top bar -->
+    <div class="top-bar">
+      <div class="brand">
+        <div class="brand-mark">D</div>
+        DSH Team
+      </div>
+      <div class="top-meta">
+        <span class="pill"><span class="dot"></span>Team running</span>
+        <span class="num">3 轮 · 12 min</span>
+      </div>
+    </div>
+
+    <!-- layout -->
+    <div class="layout">
+
+      <!-- sidebar -->
+      <aside class="sidebar">
+        <div class="sb-section">
+          <div class="sb-label">活跃 Team</div>
+          <div class="sb-item active">
+            <span style="color:var(--accent-2);">●</span>
+            <span style="flex:1;">开发流水线</span>
+            <span class="count num">3</span>
+          </div>
+          <div class="sb-item">
+            <span style="color:var(--fg-4);">○</span>
+            <span style="flex:1;">深度研究 · X</span>
+            <span class="count num">5</span>
+          </div>
+        </div>
+        <div class="sb-section">
+          <div class="sb-label">历史</div>
+          <div class="sb-item">
+            <span style="color:var(--fg-4);">○</span>
+            <span style="flex:1;">圆桌 · 昨天</span>
+            <span class="count num">3</span>
+          </div>
+          <div class="sb-item">
+            <span style="color:var(--fg-4);">○</span>
+            <span style="flex:1;">研究 · 上周</span>
+            <span class="count num">7</span>
+          </div>
+        </div>
+        <div class="sb-section">
+          <div class="sb-label">素材</div>
+          <div class="sb-item">⚙︎ 角色库</div>
+          <div class="sb-item">⌗ Team 模板</div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <main class="main">
+
+        <!-- team header -->
+        <div class="team-head">
+          <div>
+            <div class="team-name">开发流水线 · X 功能</div>
+            <div class="team-sub">
+              <span>pipeline-with-feedback</span>
+              <span class="sep">·</span>
+              <span>developer → reviewer</span>
+              <span class="sep">·</span>
+              <span class="num">2 / 3 max retries</span>
+            </div>
+          </div>
+          <div class="team-actions">
+            <button class="btn">⏸ 暂停</button>
+            <button class="btn">⋯</button>
+          </div>
+        </div>
+
+        <!-- members -->
+        <div class="members">
+          <div class="member busy">
+            <span class="av av-3">D</span>
+            <span>developer</span>
+            <span class="state">修复中</span>
+          </div>
+          <div class="member idle">
+            <span class="av av-4">R</span>
+            <span>reviewer</span>
+            <span class="state">待审</span>
+          </div>
+          <div class="member idle">
+            <span class="av av-2">T</span>
+            <span>tester</span>
+            <span class="state">待命</span>
+          </div>
+          <div class="member idle">
+            <span class="av av-1">A</span>
+            <span>archivist</span>
+            <span class="state">待命</span>
+          </div>
+        </div>
+
+        <!-- timeline -->
+        <div class="timeline">
+
+          <div class="msg">
+            <span class="av av-3" style="width:24px;height:24px;font-size:10px;">D</span>
+            <div class="body">
+              <div class="who">
+                <span class="name">developer</span>
+                <span class="time num">14:32</span>
+              </div>
+              <div class="text">开始实现 X 功能,从 src/x.py 入手,跑通测试。</div>
+            </div>
+          </div>
+
+          <!-- handoff #1 -->
+          <div class="handoff">
+            <div class="h-head">
+              <div class="h-icon">→</div>
+              <div class="h-label">handoff</div>
+              <div class="h-round num">第 1 轮</div>
+            </div>
+            <div class="h-flow">
+              <span class="av av-3">D</span>
+              <span>developer</span>
+              <span class="arrow">→</span>
+              <span class="av av-4">R</span>
+              <span>reviewer</span>
+            </div>
+            <div class="h-task">请审 X 功能的实现,关注边界条件。</div>
+            <div class="h-artifacts">
+              <span class="artifact"><span class="icon">◆</span>src/x.py</span>
+              <span class="artifact"><span class="icon">◆</span>test_report.json</span>
+              <span class="artifact"><span class="icon">◆</span>commit a3f2e1</span>
+            </div>
+          </div>
+
+          <div class="msg msg-mention">
+            <span class="av av-4" style="width:24px;height:24px;font-size:10px;">R</span>
+            <div class="body">
+              <div class="who">
+                <span class="name">reviewer</span>
+                <span class="mention">@developer</span>
+                <span class="time num">14:41</span>
+              </div>
+              <div class="text">第 12 行边界检查有问题,空数组场景会 panic。</div>
+            </div>
+          </div>
+
+          <!-- handoff #2 — return -->
+          <div class="handoff handoff-return">
+            <div class="h-head">
+              <div class="h-icon">↩</div>
+              <div class="h-label">handoff · 退回</div>
+              <div class="h-round num">第 2 轮</div>
+            </div>
+            <div class="h-flow">
+              <span class="av av-4">R</span>
+              <span>reviewer</span>
+              <span class="arrow" style="color:var(--red);">→</span>
+              <span class="av av-3">D</span>
+              <span>developer</span>
+            </div>
+            <div class="h-task">修复 3 个 review issues。</div>
+            <div class="h-artifacts">
+              <span class="artifact" style="background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.25);color:var(--red);"><span class="icon">◆</span>review-issues.json</span>
+              <span class="artifact"><span class="icon">◆</span>src/x.py:12</span>
+              <span class="artifact"><span class="icon">◆</span>src/x.py:48</span>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av av-3" style="width:24px;height:24px;font-size:10px;">D</span>
+            <div class="body">
+              <div class="who">
+                <span class="name">developer</span>
+                <span class="time num">14:58</span>
+              </div>
+              <div class="text">3 处都修了,补了 4 个边界测试,本地通过。再交。</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- intervene -->
+        <div class="intervene">
+          <div class="intervene-btn"><span class="icon">⏸</span>中断</div>
+          <div class="intervene-btn"><span class="icon">💉</span>注入</div>
+          <div class="intervene-btn"><span class="icon">✋</span>接管</div>
+          <div class="intervene-btn"><span class="icon">⏪</span>倒回</div>
+          <div class="intervene-btn"><span class="icon">⚖</span>裁判</div>
+          <div class="intervene-btn" style="background:rgba(94,106,210,0.15);border-color:rgba(94,106,210,0.4);color:var(--accent-3);"><span class="icon">✦</span>judge</div>
+        </div>
+
+        <!-- footer -->
+        <div class="footer-status">
+          <div class="left">
+            <span>hermes-adapter</span>
+            <span class="num">·</span>
+            <span>ACP ✓</span>
+            <span class="num">·</span>
+            <span>3 artifacts</span>
+            <span class="num">·</span>
+            <span>2 handoffs</span>
+          </div>
+          <div>
+            <span class="key">⌘</span><span class="key">K</span> 命令面板
+          </div>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+
+</body>
+</html>

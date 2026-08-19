@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>DSH Team 常驻面板 - mockup</title>
+<style>
+  :root {
+    --bg: #1a1d24;
+    --panel: #232730;
+    --panel-2: #2c313c;
+    --border: #353a47;
+    --fg: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #5b8def;
+    --accent-2: #7aa2ff;
+    --green: #4ade80;
+    --orange: #fb923c;
+    --red: #f87171;
+    --purple: #a78bfa;
+    --mention: #fbbf24;
+    --handoff: #38bdf8;
+    --code-bg: #1e2230;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+
+  /* 三个 mock 横排 */
+  .mocks {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    max-width: 1600px;
+  }
+  .mock {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 640px;
+  }
+  .mock-head {
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .mock-title { font-weight: 600; font-size: 13px; }
+  .mock-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+  }
+  .mock-body { flex: 1; padding: 14px; overflow: hidden; }
+
+  /* 通用 avatar */
+  .avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    flex-shrink: 0;
+  }
+  .av-brainstormer { background: linear-gradient(135deg, #a78bfa, #7c3aed); }
+  .av-critic { background: linear-gradient(135deg, #fb923c, #ea580c); }
+  .av-developer { background: linear-gradient(135deg, #4ade80, #16a34a); }
+  .av-reviewer { background: linear-gradient(135deg, #38bdf8, #0284c7); }
+  .av-searcher { background: linear-gradient(135deg, #f472b6, #db2777); }
+
+  /* ===== Mock A: 双时间线 ===== */
+  .mock-a .mock-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .col {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 10px;
+    overflow-y: auto;
+  }
+  .col-head {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .col-head .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+  .chat-dot { background: var(--mention); }
+  .handoff-dot { background: var(--handoff); }
+
+  .bubble {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    border-left: 3px solid transparent;
+  }
+  .bubble-mention { border-left-color: var(--mention); }
+  .bubble .who {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .bubble .who .name { color: var(--fg); font-weight: 500; }
+  .bubble .body-text { font-size: 12px; color: var(--fg); }
+
+  .handoff-card {
+    background: var(--panel);
+    border: 1px solid var(--handoff);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .handoff-arrow {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .handoff-arrow .from, .handoff-arrow .to {
+    display: flex; align-items: center; gap: 4px;
+  }
+  .handoff-task {
+    font-size: 12px;
+    margin: 6px 0;
+  }
+  .handoff-artifacts {
+    display: flex; gap: 4px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .artifact-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--code-bg);
+    color: var(--accent-2);
+    border: 1px solid var(--border);
+  }
+
+  /* ===== Mock B: 单一时间线分级 ===== */
+  .mock-b .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg-bubble {
+    display: flex; gap: 8px;
+  }
+  .msg-bubble .body {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 8px 10px;
+    flex: 1;
+  }
+  .msg-bubble .who {
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .msg-bubble .who .name { color: var(--fg); font-weight: 500; margin-right: 6px; }
+  .msg-bubble .body-text { font-size: 12px; }
+  .msg-mention { border-left: 2px solid var(--mention); padding-left: 8px; }
+
+  .msg-handoff {
+    background: var(--panel-2);
+    border: 1px solid var(--handoff);
+    border-radius: 10px;
+    padding: 12px;
+    margin: 4px 0;
+  }
+  .msg-handoff .handoff-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px;
+    color: var(--accent-2);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .msg-handoff .handoff-head .icon { font-size: 14px; }
+  .msg-handoff .handoff-flow {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--code-bg);
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+
+  /* ===== Mock C: 平铺不区分 ===== */
+  .mock-c .timeline {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .flat-msg {
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .flat-msg .who {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .flat-msg .who .name { color: var(--fg); font-weight: 500; }
+  .flat-msg .body-text { font-size: 12px; }
+  .flat-msg .artifact-attach {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed var(--border);
+    font-size: 10px;
+    color: var(--accent-2);
+  }
+
+  /* 成员栏 */
+  .members-bar {
+    display: flex; gap: 6px;
+    padding: 8px 14px;
+    background: var(--panel-2);
+    border-top: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .member-pill {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--code-bg);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .member-pill .avatar { width: 18px; height: 18px; font-size: 9px; }
+  .member-pill.busy { border: 1px solid var(--green); }
+  .member-pill.idle { opacity: 0.6; }
+
+  /* 介入工具条 */
+  .intervene-bar {
+    display: flex;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--code-bg);
+    border-top: 1px solid var(--border);
+  }
+  .intervene-btn {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .intervene-btn:hover { border-color: var(--accent); }
+
+  .caption {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <h1>DSH Team 常驻面板 — @mention vs handoff 视觉对比</h1>
+  <div class="sub">Mock A: 双时间线 | Mock B: 单一时间线分级 | Mock C: 平铺不区分</div>
+
+  <div class="mocks">
+
+    <!-- ========== Mock A: 双时间线 ========== -->
+    <div class="mock mock-a">
+      <div class="mock-head">
+        <span class="mock-title">Story 1: 模糊想法讨论</span>
+        <span class="mock-tag">A · 双时间线</span>
+      </div>
+      <div class="mock-body">
+        <!-- 左: 聊天 -->
+        <div class="col">
+          <div class="col-head"><span class="dot chat-dot"></span>聊天流 (@mention)</div>
+          <div class="bubble bubble-mention">
+            <div class="who"><span class="avatar av-brainstormer">B1</span><span class="name">brainstormer-甲</span><span style="color:var(--mention)">→ critic</span></div>
+            <div class="body-text">用 X 解决 Y 的核心思路是...</div>
+          </div>
+          <div class="bubble bubble-mention">
+            <div class="who"><span class="avatar av-critic">C</span><span class="name">critic</span><span style="color:var(--mention)">→ brainstormer-甲</span></div>
+            <div class="body-text">等等,Y 的边界是什么?</div>
+          </div>
+          <div class="bubble">
+            <div class="who"><span class="avatar av-brainstormer">B2</span><span class="name">brainstormer-乙</span></div>
+            <div class="body-text">补充一个角度:...</div>
+          </div>
+        </div>
+        <!-- 右: handoff -->
+        <div class="col">
+          <div class="col-head"><span class="dot handoff-dot"></span>handoff 流 (产物)</div>
+          <div class="handoff-card">
+            <div class="handoff-arrow">
+              <div class="from"><span class="avatar av-brainstormer">B1</span>brainstormer-甲</div>
+              →
+              <div class="to"><span class="avatar av-critic">C</span>critic</div>
+            </div>
+            <div class="handoff-task">请评审方案 v2</div>
+            <div class="handoff-artifacts">
+              <span class="artifact-chip">📄 方案 v2.md</span>
+              <span class="artifact-chip">📊 调研数据</span>
+            </div>
+          </div>
+          <div class="handoff-card">
+            <div class="handoff-arrow">
+              <div class="from"><span class="avatar av-critic">C</span>critic</div>
+              →
+              <div class="to"><span class="avatar av-brainstormer">B1</span>brainstormer-甲</div>
+            </div>
+            <div class="handoff-task">3 处质疑需回应</div>
+            <div class="handoff-artifacts">
+              <span class="artifact-chip">⚠️ 质疑清单.json</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="members-bar">
+        <div class="member-pill busy"><span class="avatar av-brainstormer">B1</span>brainstormer-甲 · 工作中</div>
+        <div class="member-pill"><span class="avatar av-critic">C</span>critic · 待命</div>
+        <div class="member-pill"><span class="avatar av-brainstormer">B2</span>brainstormer-乙 · 待命</div>
+      </div>
+      <div class="intervene-bar">
+        <div class="intervene-btn">⏸ 中断</div>
+        <div class="intervene-btn">💉 注入</div>
+        <div class="intervene-btn">✋ 接管</div>
+        <div class="intervene-btn">⏪ 倒回</div>
+        <div class="intervene-btn">⚖ 裁判</div>
+      </div>
+    </div>
+
+    <!-- ========== Mock B: 单一时间线分级 ========== -->
+    <div class="mock mock-b">
+      <div class="mock-head">
+        <span class="mock-title">Story 2: 开发流水线</span>
+        <span class="mock-tag">B · 单线分级</span>
+      </div>
+      <div class="mock-body">
+        <div class="timeline">
+          <div class="msg-bubble">
+            <span class="avatar av-developer">D</span>
+            <div class="body msg-mention">
+              <div class="who"><span class="name">developer</span><span style="color:var(--muted)">开始实现 X 功能</span></div>
+            </div>
+          </div>
+          <div class="msg-handoff">
+            <div class="handoff-head"><span class="icon">📦</span>handoff · 第 1 轮</div>
+            <div class="handoff-flow">
+              <span class="avatar av-developer">D</span>developer
+              <span style="color:var(--handoff)">→</span>
+              <span class="avatar av-reviewer">R</span>reviewer
+            </div>
+            <div class="handoff-task" style="margin-top:8px;">请审 X 功能的实现</div>
+            <div class="handoff-artifacts">
+              <span class="artifact-chip">💻 src/x.py</span>
+              <span class="artifact-chip">✅ 测试报告</span>
+            </div>
+          </div>
+          <div class="msg-bubble">
+            <span class="avatar av-reviewer">R</span>
+            <div class="body msg-mention">
+              <div class="who"><span class="name">reviewer</span><span style="color:var(--red)">@developer · 第 12 行有 bug</span></div>
+            </div>
+          </div>
+          <div class="msg-handoff" style="border-color:var(--red);">
+            <div class="handoff-head" style="color:var(--red);"><span class="icon">↩️</span>handoff · 退回修改</div>
+            <div class="handoff-flow">
+              <span class="avatar av-reviewer">R</span>reviewer
+              <span style="color:var(--red)">→</span>
+              <span class="avatar av-developer">D</span>developer
+            </div>
+            <div class="handoff-task" style="margin-top:8px;">修复 3 个问题</div>
+            <div class="handoff-artifacts">
+              <span class="artifact-chip">⚠️ review-issues.json</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="members-bar">
+        <div class="member-pill"><span class="avatar av-developer">D</span>developer · 修复中</div>
+        <div class="member-pill idle"><span class="avatar av-reviewer">R</span>reviewer · 待命</div>
+      </div>
+      <div class="intervene-bar">
+        <div class="intervene-btn">⏸ 中断</div>
+        <div class="intervene-btn">💉 注入</div>
+        <div class="intervene-btn">✋ 接管</div>
+        <div class="intervene-btn">⏪ 倒回</div>
+        <div class="intervene-btn">⚖ 裁判</div>
+      </div>
+    </div>
+
+    <!-- ========== Mock C: 平铺不区分 ========== -->
+    <div class="mock mock-c">
+      <div class="mock-head">
+        <span class="mock-title">Story 3: 深度研究</span>
+        <span class="mock-tag">C · 平铺</span>
+      </div>
+      <div class="mock-body">
+        <div class="timeline">
+          <div class="flat-msg">
+            <div class="who"><span class="avatar av-searcher">S</span><span class="name">web-searcher</span></div>
+            <div class="body-text">抓到 47 条相关结果</div>
+          </div>
+          <div class="flat-msg">
+            <div class="who"><span class="avatar av-searcher">G</span><span class="name">github-analyst</span></div>
+            <div class="body-text">找到 12 个相关 repo</div>
+            <div class="artifact-attach">📎 raw-data.json (12 repos)</div>
+          </div>
+          <div class="flat-msg">
+            <div class="who"><span class="avatar av-searcher">S2</span><span class="name">social-media</span></div>
+            <div class="body-text">讨论热度中等,3 个关键人物</div>
+          </div>
+          <div class="flat-msg">
+            <div class="who"><span class="avatar av-brainstormer">A</span><span class="name">analyzer</span></div>
+            <div class="body-text">汇总三方数据,综合分析中...</div>
+            <div class="artifact-attach">📎 汇总中 (3 个上游)</div>
+          </div>
+          <div class="flat-msg" style="opacity:0.6;">
+            <div class="who"><span class="avatar av-brainstormer">W</span><span class="name">writer</span></div>
+            <div class="body-text">等 analyzer 完成后出报告</div>
+          </div>
+        </div>
+      </div>
+      <div class="members-bar">
+        <div class="member-pill busy"><span class="avatar av-searcher">S</span>web-searcher · 完成</div>
+        <div class="member-pill busy"><span class="avatar av-searcher">G</span>github-analyst · 完成</div>
+        <div class="member-pill busy"><span class="avatar av-searcher">S2</span>social-media · 完成</div>
+        <div class="member-pill busy"><span class="avatar av-brainstormer">A</span>analyzer · 汇总中</div>
+        <div class="member-pill idle"><span class="avatar av-brainstormer">W</span>writer · 待命</div>
+      </div>
+      <div class="intervene-bar">
+        <div class="intervene-btn">⏸ 中断</div>
+        <div class="intervene-btn">💉 注入</div>
+        <div class="intervene-btn">✋ 接管</div>
+        <div class="intervene-btn">⏪ 倒回</div>
+        <div class="intervene-btn">⚖ 裁判</div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>
