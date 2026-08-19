@@ -21,3 +21,20 @@
 ## 一句话定义
 
 DSH Team 插件让用户在 DSH WebUI 里**以"角色 + 团队"的视角组织多个 Agent**——角色是素材库，团队是临时剧组。Agent 全部走 ACP 协议接入底层 CLI，成员之间通过结构化 handoff 协作。
+
+## 阅读路径
+
+按角色挑入口：
+
+| 你想做的事 | 先读 | 关键章节 |
+|---|---|---|
+| 理解产品是什么 / 怎么定下来的 | `requirements.md` | §0 一句话 / §2 核心概念 / §8 已闭环决策 |
+| 了解七轮讨论里关键决策和被否决方案 | `discussion-log.md` | 轮次索引 + §5-§9 各轮 |
+| 写代码 / 评审实现方案 | `architecture.md` | §1 形态选型 / §4 核心子系统 / §5 数据存储 / §12 实现阶段 P0-P8 |
+| 看 UI 长什么样 | `mockups/panel-linear.html` | 直接打开 |
+
+## 开发入口
+- **双格式打包**：[`/dsh-dual-plugin-guide` skill](C:/Users/32115/.agents/skills/dsh-dual-plugin-guide/SKILL.md) 走单目录同时是 DSH 静态插件包 + Agent Plugins 1.0 插件
+- **DSH 源码**：`D:\programming\projects\study\dsh`（所有 Service / Slot / 事件 / 复用能力从此出发）
+- **路线**：P0 骨架（`package.json` + `lib/index.js` + `skills/start-team/SKILL.md` + `cordis.patch.yml` + `plugin.json`）→ P1 Story 1 完整 → P2 Story 2 → P3 Story 3 → P4-P8 渐进
+- **Open Questions**（实现前需用户拍板）：见 `architecture.md §11.2`（OQ-1 plan step intent 枚举 / OQ-2 决策点等待默认值 / OQ-3 跨 Run artifact id 编码格式 等）
