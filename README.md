@@ -1,6 +1,8 @@
 # DSH Team 插件
 
 > DSH WebUI 的 Agent Team 插件——多 Agent 协作的 UI 层。
+>
+> **本仓根（`./`）即双格式插件包的根**：仓根 = DSH 静态插件包根 = Agent Plugins 1.0 插件根。代码形态按 [`architecture.md §1.3`](./architecture.md#13-双格式包结构本仓根布局) 组织，文件尚未生成。
 
 ## 文档索引
 
@@ -11,6 +13,7 @@
 | [architecture.md](./architecture.md) | 实现架构 | ✅ v1 骨架（模块 / 状态机 / 三个 flow / UI Slot / 打包） |
 | [mockups/panel-linear.html](./mockups/panel-linear.html) | 常驻面板 mockup（Linear 风）| ✅ 骨架验证 |
 | [mockups/panel-mock-v1-废弃.html](./mockups/panel-mock-v1-废弃.html) | 第一版 mockup（三个对比，已废弃）| 🗑 仅作历史 |
+| [AGENTS.md](./AGENTS.md) | 给 Agent 看的项目约定 | — |
 
 ## 文档命名说明
 
@@ -34,7 +37,8 @@ DSH Team 插件让用户在 DSH WebUI 里**以"角色 + 团队"的视角组织�
 | 看 UI 长什么样 | `mockups/panel-linear.html` | 直接打开 |
 
 ## 开发入口
+- **代码位置**：本仓根（`./`）— 与文档同仓，无独立代码仓
 - **双格式打包**：[`/dsh-dual-plugin-guide` skill](C:/Users/32115/.agents/skills/dsh-dual-plugin-guide/SKILL.md) 走单目录同时是 DSH 静态插件包 + Agent Plugins 1.0 插件
 - **DSH 源码**：`D:\programming\projects\study\dsh`（所有 Service / Slot / 事件 / 复用能力从此出发）
-- **路线**：P0 骨架（`package.json` + `lib/index.js` + `skills/start-team/SKILL.md` + `cordis.patch.yml` + `plugin.json`）→ P1 Story 1 完整 → P2 Story 2 → P3 Story 3 → P4-P8 渐进
+- **路线**：P0 骨架（`package.json` + `cordis.patch.yml` + `plugin.json` + `lib/index.js` + `skills/start-team/SKILL.md`）→ P1 Story 1 完整 → P2 Story 2 → P3 Story 3 → P4-P8 渐进
 - **Open Questions**（实现前需用户拍板）：见 `architecture.md §11.2`（OQ-1 plan step intent 枚举 / OQ-2 决策点等待默认值 / OQ-3 跨 Run artifact id 编码格式 等）

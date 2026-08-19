@@ -15,12 +15,12 @@
 | [`architecture.md`](./architecture.md) | **本文件** — DSH 侧实现架构（怎么在 DSH 里实现） |
 | [`mockups/panel-linear.html`](./mockups/panel-linear.html) | 常驻面板 UI 骨架（Linear 风 app shell） |
 
-**范围**：实现侧架构、组件划分、Service 接口骨架、关键事件、数据存储布局、生命周期与并发约束、与 DSH 已有能力的复用关系、实现阶段。
+**范围**：实现侧架构、组件划分、Service 接口骨架、关键事件、数据存储布局、生命周期与并发约束、与 DSH 已有能力的复用关系、实现阶段、仓根包结构。
 
 **非范围**：
 
 - 重新讨论产品形态 / 机制层（`requirements.md` 第八轮之前任何点都视作定稿）
-- 具体业务实现代码（接口级骨架，签名 / 路径 / 事件名，函数体不展开）
+- 业务实现代码体（`lib/` `services/` `ui/` `skills/` 的函数体 / 组件实现 / 业务逻辑）——接口级骨架落到本文件，函数体留给仓内代码文件
 - 视觉细节（配色 / 字体 / 间距 / 圆角 / 动效）— §11.3 + `requirements.md §10.3` 留给后续
 - 跨 Run artifact 引用 id 内 run 归属段的具体编码格式（`requirements.md §11.4` Open Question，DSH 实现层定）
 
@@ -40,14 +40,15 @@
 | 内核 | Cordis 插件 | DSH 原生架构（everything is a plugin，`D:\programming\projects\study\dsh\AGENTS.md`）|
 | 入口 | `apply(ctx)` 函数形 | 与现有 DSH 插件保持一致；不引入 class/plugin 形 |
 | 注册 | `ctx.skills` + `ctx.tools` + 自定义 `ctx.team` Service | 三处注册：skill 给 agent 调用，tool 给 DSH 调度者调用，Service 给插件内各组件互相调用 |
-| 包位置 | **独立仓** `dsh-team-plugin/`（不是 DSH monorepo `packages/team/`）| 走 dsh plugin --profile add 安装，可发布可分发 |
+| 包位置 | **本仓根**（`./` 即双格式包根；不是 DSH monorepo `packages/team/`）| 文档与代码同仓；走 `dsh plugin --profile add` 安装，可发布可分发 |
 | 数据根 | `<DSH 数据根>/team-runs/<run-id>/`（项目级）+ `<DSH 数据根>/{roles,members,team-templates}/`（全局）| 与 `§5.1` 目录一致 |
 
 **为什么不放 DSH 仓内 monorepo `packages/team/`**：
 
 - 跨生态分发有真实需求（`discussion-log.md §6.4` 调研 + §6.6 借鉴但未采纳）：`requirements.md §6` Adapter 集合是封闭的，但插件本身要走 Agent Plugins 1.0 兼容，方便在 DSH 之外（Codex / Cursor / VS Code 等）装载
-- DSH Team 五个协调日志（`§2.4`）的"单写入者=DSH"承诺要求 DSH 进程持有 Service 写入器——这在独立插件里也成立（DSH 进程跑这个插件，DSH 死 = 整队销毁）
+- DSH Team 五个协调日志（`§2.4`）的"单写入者=DSH"承诺要求 DSH 进程持有 Service 写入器——这在本仓插件里也成立（DSH 进程跑这个插件，DSH 死 = 整队销毁）
 - 双格式是 [`dsh-dual-plugin-guide`](C:/Users/32115/.agents/skills/dsh-dual-plugin-guide/SKILL.md) 默认形态，工具链（scaffold / verify / install）齐备
+- 文档与代码同仓便于审阅：架构 / 接口骨架 / 落地代码 / 决策记录可一并 review；P0-P8 推进时无需跨仓同步
 
 **为什么不是动态 Cordis 插件**：
 
@@ -63,12 +64,18 @@
 - **插件工具**：`team.start` / `team.abort` / `team.continue` / `team.complete` / `team.list` 等 DSH 通过 Cordis 注入的工具；skill 不实现核心逻辑，仅薄包装
 - **架构归属**：核心逻辑 = Cordis 插件；skill = thin wrapper；UI = 配置中心 + 常驻面板（**不**作 Team 启动入口）
 
-### 1.3 双格式包结构（待实施占位）
+### 1.3 双格式包结构（本仓根布局）
 
-按 `dsh-dual-plugin-guide` 双格式布局：
+按 `dsh-dual-plugin-guide` 双格式布局，**`./` 既是仓根也是双格式包根**——文档与代码同仓：
 
 ```
-dsh-team-plugin/
+./
+├── README.md                   # 文档总索引 + 一句话定义
+├── requirements.md             # 需求规格（产品形态 + 机制层定稿）
+├── discussion-log.md           # 讨论过程 / 关键决策 / 被否决方案
+├── architecture.md             # 本文件
+├── AGENTS.md                   # 给 Agent 看的项目约定
+├── mockups/                    # UI 草图 HTML
 ├── package.json                # name/type:module/main:lib/index.js + dsh.bundle.patch + files
 ├── plugin.json                 # Agent Plugins 1.0 清单
 ├── cordis.patch.yml            # - insert: - id: dsh-team-plugin-skill, name: '<pkg-name>'
@@ -95,6 +102,7 @@ dsh-team-plugin/
 └── references/                 # （可选）事实库引用
 ```
 
+> 仓根即包根——`dsh plugin --profile add <this-repo>` 直接以本仓为插件源；`package.json` / `cordis.patch.yml` / `plugin.json` 与 `lib/index.js` 同在仓根，文件尚未生成（🟡 待实施）。
 > 命名 / 路径 / 内部模块划分细节待实施时按 dsh-dual-plugin-guide 落地。
 
 ---

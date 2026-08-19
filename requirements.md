@@ -1,8 +1,8 @@
 # DSH Team 插件 — 需求规格（v1 定稿 + 第五轮机制层扩展）
 
 > **状态**：2026-08-18 第四轮产品形态拍板（v1 闭环）；2026-08-19 第五轮机制层全面扩展（abort 终态 / 失败处理 / Plan 机制 / 决策点 / 产物共享 / 多 Team UI / read_only 判定）。
-> 本文档是"需求层"——只定义产品形态、用户故事、产品规则、机制层（Team Run / Member Session / 消息路由 / Plan / 决策点 / 产物体系），不涉及具体技术实现（实现是 DSH 侧的事）。
-> 配套文档：[discussion-log.md](./discussion-log.md)（讨论过程，五轮）、[architecture.md](./architecture.md)（实现侧架构，待补）、[mockups/](./mockups/)（UI 草图）。
+> 本文档是"需求层"——只定义产品形态、用户故事、产品规则、机制层（Team Run / Member Session / 消息路由 / Plan / 决策点 / 产物体系），不涉及具体技术实现（实现见 `architecture.md` 与本仓 `lib/` `services/` `ui/` `skills/`）。
+> 配套文档：[discussion-log.md](./discussion-log.md)（讨论过程，五轮）、[architecture.md](./architecture.md)（实现侧架构，v1 骨架）、[mockups/](./mockups/)（UI 草图）、[AGENTS.md](./AGENTS.md)（项目约定 + 仓库结构 + 写作边界分层）。
 
 ---
 
@@ -1528,7 +1528,7 @@ DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mo
 - ✅ 可聊：Team Run 状态枚举、状态转换图、artifact 字段、dispatch / 消息 log 结构、目录的逻辑划分
 - ❌ 不能聊：用什么语言 / 库 / ORM / 数据库 / async 模型 / 文件路径 / 进程模型
 
-实现是 DSH 侧的事，本文只规定**逻辑机制**。
+实现见 `architecture.md` 接口骨架 + 本仓 `lib/` `services/` `ui/` `skills/`（待落地）。本文只规定**逻辑机制**。
 
 ---
 

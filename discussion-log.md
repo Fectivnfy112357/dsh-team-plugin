@@ -169,8 +169,10 @@
 
 ## 3. 文档目录
 
+> 本节记录**第一轮**讨论时提出的结构提议。后续落实时**简化了路径**——所有文档从 `docs/dsh-team-plugin/` 提到仓根，code 也同仓落地（仓根即双格式包根）。当前实际结构见 [`README.md` §文档索引](../README.md) 与 [`AGENTS.md` §仓库结构](../AGENTS.md)。本节保留作历史记录。
+
 ```
-docs/dsh-team-plugin/
+docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 ├── README.md             # 索引
 ├── requirements.md       # 需求规格（定稿）
 ├── discussion-log.md     # 本文档
