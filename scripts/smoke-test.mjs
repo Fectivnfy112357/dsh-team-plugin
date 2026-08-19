@@ -35,7 +35,7 @@ async function importService(rel) {
 
 try {
   // ---- paths.js ----
-  console.log('[1/12] paths.js');
+  console.log('[1/15] paths.js');
   const { resolveTeamPaths, runDir } = await importService('services/paths.js');
   const paths = resolveTeamPaths();
   paths.teamRunsDir === join(tmp, '.dsh', 'team-runs')
@@ -46,7 +46,7 @@ try {
     : bad(`globalRoot = ${paths.globalRoot}`);
 
   // ---- log-writer.js ----
-  console.log('\n[2/12] log-writer.js');
+  console.log('\n[2/15] log-writer.js');
   const { appendLog, writeJsonFile } = await importService('services/log-writer.js');
   // Pre-create run dir so appendLog can find it (service normally ensures this)
   const runId0 = 'smoke-pre';
@@ -72,7 +72,7 @@ try {
   allValid ? ok('all 20 entries parse and have unique ids') : bad('overwrite or invalid JSON detected');
 
   // ---- team-service.js: happy path + illegal transition ----
-  console.log('\n[3/12] team-service.js');
+  console.log('\n[3/15] team-service.js');
   const ts = await importService('services/team-service.js');
   const meta = await ts.start({
     taskDescription: 'smoke test',
@@ -129,7 +129,7 @@ try {
     : bad(`state-history reasons = ${histReasons}`);
 
   // ---- reconcileOnBoot ----
-  console.log('\n[4/12] reconcileOnBoot');
+  console.log('\n[4/15] reconcileOnBoot');
   // Create a second run that pretends to be held by a different (dead) process
   const orphanMeta = await ts.start({
     taskDescription: 'orphan test',
@@ -148,7 +148,7 @@ try {
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
 
   // ---- 5. DecisionPointService ----
-  console.log('\n[5/12] DecisionPointService');
+  console.log('\n[5/15] DecisionPointService');
   const dpSvc = await importService('services/decision-point-service.js');
   dpSvc._resetForTests();
   // Create a run + members so the DP has context
@@ -188,7 +188,7 @@ try {
   dpSvc.waitingDecisions(dpRunId).length === 0 ? ok('waitingDecisions() empty after respond') : bad('still has open DP');
 
   // ---- 6. MessageService ----
-  console.log('\n[6/12] MessageService');
+  console.log('\n[6/15] MessageService');
   const msgSvc = await importService('services/message-service.js');
   msgSvc._resetForTests();
   const sentMsg = await msgSvc.send({
@@ -219,7 +219,7 @@ try {
     : bad('wake dedup blocks unrelated target');
 
   // ---- 7. RoundTableFlow ----
-  console.log('\n[7/12] RoundTableFlow');
+  console.log('\n[7/15] RoundTableFlow');
   const flowSvc = await importService('services/flow-engine.js');
   const rtRunMeta = await ts.start({
     taskDescription: 'round-table test',
@@ -260,7 +260,7 @@ try {
   finalMeta.state === 'succeeded' ? ok('meta.state=succeeded after flow') : bad(`state=${finalMeta.state}`);
 
   // ---- 8. setDegraded ----
-  console.log('\n[8/12] setDegraded');
+  console.log('\n[8/15] setDegraded');
   const degRunMeta = await ts.start({
     taskDescription: 'degraded test',
     flow: 'handoff-round-table',
@@ -282,7 +282,7 @@ try {
     : bad('degraded-flag-set reason not in state-history');
 
   // ---- 9. UI components ----
-  console.log('\n[9/12] UI components');
+  console.log('\n[9/15] UI components');
   // 9a) Each component module loads and exports a function
   const { TeamMemberChip } = await importService('ui/team-member-chip.js');
   const { TeamDecisionBadge } = await importService('ui/team-decision-badge.js');
@@ -341,7 +341,7 @@ try {
     : bad(`emptyChildren=${emptyChildren}`);
 
   // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
-  console.log('\n[10/12] PipelineFlow (happy path)');
+  console.log('\n[10/15] PipelineFlow (happy path)');
   const pipeSvc = await importService('services/pipeline-flow.js');
   pipeSvc._resetForTests();
   const pipeMeta = await ts.start({
@@ -384,7 +384,7 @@ try {
   dlLines.length === 4 ? ok('dispatch-log has 4 entries (2 dispatches + 2 markTerminal)') : bad(`dispatch-log len=${dlLines.length}`);
 
   // ---- 11. PipelineFlow: step 0 fails, retry with feedback, then succeeds ----
-  console.log('\n[11/12] PipelineFlow (feedback loop)');
+  console.log('\n[11/15] PipelineFlow (feedback loop)');
   pipeSvc._resetForTests();
   const fbMeta = await ts.start({
     taskDescription: 'pipeline feedback test',
@@ -415,7 +415,7 @@ try {
   fbHlLines.length === 4 ? ok('feedback loop handoff-log has 4 entries') : bad(`fb handoff-log len=${fbHlLines.length}`);
 
   // ---- 12. PipelineFlow: max_retries=0, fail -> failed terminal ----
-  console.log('\n[12/12] PipelineFlow (no retries)');
+  console.log('\n[12/15] PipelineFlow (no retries)');
   pipeSvc._resetForTests();
   const noMeta = await ts.start({
     taskDescription: 'pipeline no-retry test',
@@ -437,6 +437,112 @@ try {
   noResult.terminal === 'failed' ? ok('max_retries=0 + fail -> failed') : bad(`terminal=${noResult.terminal}`);
   const noFinalMeta = await ts.readMeta(noRunId);
   noFinalMeta.state === 'failed' ? ok('no-retry meta.state=failed') : bad(`state=${noFinalMeta.state}`);
+
+  // ---- 13. FanOut happy path: 2 branches, no pre-flight, both complete ----
+  console.log('\n[13/15] FanOut (happy path)');
+  const foSvc = await importService('services/fan-out-flow.js');
+  foSvc._resetForTests();
+  const foMeta = await ts.start({
+    taskDescription: 'fan-out happy',
+    flow: 'fan-out-collect',
+    flowConfig: {
+      parallel: [
+        { member_id: 'a', task: 'lookup a' },
+        { member_id: 'b', task: 'lookup b' },
+      ],
+    },
+    members: [
+      { member_id: 'a', instance_alias: 'alpha' },
+      { member_id: 'b', instance_alias: 'beta' },
+    ],
+  });
+  const foRunId = foMeta.id;
+  await ts.markHolder(foRunId);
+  await ts.transition(foRunId, 'pending', 'assembling', 'team-formed');
+  const foPromise = flowSvc.run(foRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  foSvc.signalBranchTerminal(foRunId, 'a', 'complete', { produced_artifact_ids: ['a1'] });
+  foSvc.signalBranchTerminal(foRunId, 'b', 'complete', { produced_artifact_ids: ['b1'] });
+  const foResult = await foPromise;
+  foResult.terminal === 'succeeded' ? ok('fan-out happy: 2 branches complete -> succeeded') : bad(`terminal=${foResult.terminal}`);
+  const foFinal = await ts.readMeta(foRunId);
+  foFinal.state === 'succeeded' ? ok('fan-out meta.state=succeeded') : bad(`state=${foFinal.state}`);
+  foFinal.degraded_flag === false ? ok('fan-out degraded_flag=false when all complete') : bad(`degraded=${foFinal.degraded_flag}`);
+
+  // ---- 14. FanOut partial: 3 branches, 1 fails -> succeeded(partial, degraded) ----
+  console.log('\n[14/15] FanOut (partial)');
+  foSvc._resetForTests();
+  dpSvc._resetForTests();
+  const fpMeta = await ts.start({
+    taskDescription: 'fan-out partial',
+    flow: 'fan-out-collect',
+    flowConfig: {
+      parallel: [
+        { member_id: 'a', task: 'lookup a' },
+        { member_id: 'b', task: 'lookup b' },
+        { member_id: 'c', task: 'lookup c' },
+      ],
+    },
+    members: [
+      { member_id: 'a', instance_alias: 'alpha' },
+      { member_id: 'b', instance_alias: 'beta' },
+      { member_id: 'c', instance_alias: 'gamma' },
+    ],
+  });
+  const fpRunId = fpMeta.id;
+  await ts.markHolder(fpRunId);
+  await ts.transition(fpRunId, 'pending', 'assembling', 'team-formed');
+  const fpPromise = flowSvc.run(fpRunId, null);
+  // 3 branches -> pre-flight DP. Wait for it to open.
+  await new Promise((r) => setTimeout(r, 100));
+  const preFlightDp = dpSvc.waitingDecisions(fpRunId).find((d) => d.kind === 'ad-hoc');
+  preFlightDp ? ok('pre-flight DP opened for 3+ branch fan-out') : bad('no pre-flight DP');
+  if (preFlightDp) {
+    await dpSvc.respond(preFlightDp.id, { action: 'continue' });
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Now signal 2 complete + 1 fail
+  foSvc.signalBranchTerminal(fpRunId, 'a', 'complete', { produced_artifact_ids: ['a1'] });
+  foSvc.signalBranchTerminal(fpRunId, 'b', 'complete', { produced_artifact_ids: ['b1'] });
+  foSvc.signalBranchTerminal(fpRunId, 'c', 'fail', { feedback: 'no data' });
+  await fpPromise;
+  const fpFinal = await ts.readMeta(fpRunId);
+  fpFinal.state === 'succeeded' ? ok('partial: 2/3 complete -> succeeded') : bad(`state=${fpFinal.state}`);
+  fpFinal.degraded_flag === true ? ok('partial: degraded_flag=true (≥1 非全部失败)') : bad(`degraded=${fpFinal.degraded_flag}`);
+
+  // ---- 15. FanOut pre-flight cancel: 3 branches, DP abort -> aborted ----
+  console.log('\n[15/15] FanOut (pre-flight cancel)');
+  foSvc._resetForTests();
+  dpSvc._resetForTests();
+  const fcMeta = await ts.start({
+    taskDescription: 'fan-out pre-flight cancel',
+    flow: 'fan-out-collect',
+    flowConfig: {
+      parallel: [
+        { member_id: 'a', task: 'lookup a' },
+        { member_id: 'b', task: 'lookup b' },
+        { member_id: 'c', task: 'lookup c' },
+      ],
+    },
+    members: [
+      { member_id: 'a', instance_alias: 'alpha' },
+      { member_id: 'b', instance_alias: 'beta' },
+      { member_id: 'c', instance_alias: 'gamma' },
+    ],
+  });
+  const fcRunId = fcMeta.id;
+  await ts.markHolder(fcRunId);
+  await ts.transition(fcRunId, 'pending', 'assembling', 'team-formed');
+  const fcPromise = flowSvc.run(fcRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  const preDp = dpSvc.waitingDecisions(fcRunId).find((d) => d.kind === 'ad-hoc');
+  if (preDp) {
+    await dpSvc.respond(preDp.id, { action: 'abort', feedback: 'too expensive' });
+    const fcResult = await fcPromise;
+    fcResult.terminal === 'aborted' ? ok('pre-flight abort -> aborted') : bad(`terminal=${fcResult.terminal}`);
+  } else {
+    bad('pre-flight DP not found for fan-out 3 branches');
+  }
 
   console.log('');
   if (fail === 0) {

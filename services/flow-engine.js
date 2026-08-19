@@ -10,6 +10,7 @@
 import { readMeta } from './team-service.js';
 import { runRoundTable } from './round-table-flow.js';
 import { runPipeline } from './pipeline-flow.js';
+import { runFanOut } from './fan-out-flow.js';
 
 /**
  * Run a Team Run under its declared flow. Returns when the run reaches a
@@ -38,7 +39,7 @@ export async function run(runId, ctx = null) {
     case 'pipeline-with-feedback':
       return runPipeline(runId, meta, ctx);
     case 'fan-out-collect':
-      throw new Error('flow-engine: fan-out-collect is P3 (not in v1.0)');
+      return runFanOut(runId, meta, ctx);
     default:
       throw new Error(`flow-engine: unknown flow "${meta.flow}"`);
   }
