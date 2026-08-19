@@ -35,7 +35,7 @@ async function importService(rel) {
 
 try {
   // ---- paths.js ----
-  console.log('[1/8] paths.js');
+  console.log('[1/9] paths.js');
   const { resolveTeamPaths, runDir } = await importService('services/paths.js');
   const paths = resolveTeamPaths();
   paths.teamRunsDir === join(tmp, '.dsh', 'team-runs')
@@ -46,7 +46,7 @@ try {
     : bad(`globalRoot = ${paths.globalRoot}`);
 
   // ---- log-writer.js ----
-  console.log('\n[2/8] log-writer.js');
+  console.log('\n[2/9] log-writer.js');
   const { appendLog, writeJsonFile } = await importService('services/log-writer.js');
   // Pre-create run dir so appendLog can find it (service normally ensures this)
   const runId0 = 'smoke-pre';
@@ -72,7 +72,7 @@ try {
   allValid ? ok('all 20 entries parse and have unique ids') : bad('overwrite or invalid JSON detected');
 
   // ---- team-service.js: happy path + illegal transition ----
-  console.log('\n[3/8] team-service.js');
+  console.log('\n[3/9] team-service.js');
   const ts = await importService('services/team-service.js');
   const meta = await ts.start({
     taskDescription: 'smoke test',
@@ -129,7 +129,7 @@ try {
     : bad(`state-history reasons = ${histReasons}`);
 
   // ---- reconcileOnBoot ----
-  console.log('\n[4/8] reconcileOnBoot');
+  console.log('\n[4/9] reconcileOnBoot');
   // Create a second run that pretends to be held by a different (dead) process
   const orphanMeta = await ts.start({
     taskDescription: 'orphan test',
@@ -148,7 +148,7 @@ try {
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
 
   // ---- 5. DecisionPointService ----
-  console.log('\n[5/8] DecisionPointService');
+  console.log('\n[5/9] DecisionPointService');
   const dpSvc = await importService('services/decision-point-service.js');
   dpSvc._resetForTests();
   // Create a run + members so the DP has context
@@ -188,7 +188,7 @@ try {
   dpSvc.waitingDecisions(dpRunId).length === 0 ? ok('waitingDecisions() empty after respond') : bad('still has open DP');
 
   // ---- 6. MessageService ----
-  console.log('\n[6/8] MessageService');
+  console.log('\n[6/9] MessageService');
   const msgSvc = await importService('services/message-service.js');
   msgSvc._resetForTests();
   const sentMsg = await msgSvc.send({
@@ -219,7 +219,7 @@ try {
     : bad('wake dedup blocks unrelated target');
 
   // ---- 7. RoundTableFlow ----
-  console.log('\n[7/8] RoundTableFlow');
+  console.log('\n[7/9] RoundTableFlow');
   const flowSvc = await importService('services/flow-engine.js');
   const rtRunMeta = await ts.start({
     taskDescription: 'round-table test',
@@ -260,7 +260,7 @@ try {
   finalMeta.state === 'succeeded' ? ok('meta.state=succeeded after flow') : bad(`state=${finalMeta.state}`);
 
   // ---- 8. setDegraded ----
-  console.log('\n[8/8] setDegraded');
+  console.log('\n[8/9] setDegraded');
   const degRunMeta = await ts.start({
     taskDescription: 'degraded test',
     flow: 'handoff-round-table',
@@ -280,6 +280,65 @@ try {
   /degraded-flag-set:member-brain-down/.test(shLines.join('\n'))
     ? ok('state-history records degraded-flag-set with reason')
     : bad('degraded-flag-set reason not in state-history');
+
+  // ---- 9. UI components ----
+  console.log('\n[9/9] UI components');
+  // 9a) Each component module loads and exports a function
+  const { TeamMemberChip } = await importService('ui/team-member-chip.js');
+  const { TeamDecisionBadge } = await importService('ui/team-decision-badge.js');
+  const { TeamHandoffCard } = await importService('ui/team-handoff-card.js');
+  const { TeamHandoffRedo } = await importService('ui/team-handoff-redo.js');
+  const { TeamPanel } = await importService('ui/team-panel.js');
+  typeof TeamMemberChip === 'function' ? ok('TeamMemberChip is a function') : bad('TeamMemberChip export shape');
+  typeof TeamDecisionBadge === 'function' ? ok('TeamDecisionBadge is a function') : bad('TeamDecisionBadge export shape');
+  typeof TeamHandoffCard === 'function' ? ok('TeamHandoffCard is a function') : bad('TeamHandoffCard export shape');
+  typeof TeamHandoffRedo === 'function' ? ok('TeamHandoffRedo is a function') : bad('TeamHandoffRedo export shape');
+  typeof TeamPanel === 'function' ? ok('TeamPanel is a function') : bad('TeamPanel export shape');
+
+  // 9b) Each component renders (via the React shim -> sentinel object)
+  const chipEl = TeamMemberChip({ memberId: 'brain', displayName: 'Brain', roleId: 'brain', adapter: 'hermes', state: 'working' });
+  chipEl && chipEl.__reactEl && chipEl.type === 'div' && chipEl.props['data-member-id'] === 'brain'
+    ? ok('TeamMemberChip renders with memberId / state props')
+    : bad(`chipEl=${JSON.stringify(chipEl)}`);
+
+  const badgeEmpty = TeamDecisionBadge({ waitingCount: 0 });
+  badgeEmpty === null ? ok('TeamDecisionBadge returns null when waitingCount=0') : bad('badge should be null');
+  const badgeOpen = TeamDecisionBadge({ waitingCount: 1, kinds: ['convergence'], runId: 'r1' });
+  badgeOpen && badgeOpen.props['data-waiting-count'] === 1 && badgeOpen.props['data-kinds'] === 'convergence'
+    ? ok('TeamDecisionBadge renders when waitingCount>0')
+    : bad(`badgeOpen=${JSON.stringify(badgeOpen)}`);
+
+  const handoffNormal = TeamHandoffCard({ from: 'brain', to: 'critic', task: 'review', state: 'in_flight' });
+  handoffNormal && handoffNormal.props['data-variant'] === 'normal'
+    ? ok('TeamHandoffCard defaults to variant=normal')
+    : bad(`handoffNormal variant=${handoffNormal?.props?.['data-variant']}`);
+
+  const handoffRedo = TeamHandoffRedo({ from: 'critic', to: 'brain', reason: 'lacks detail', state: 'redo' });
+  handoffRedo && handoffRedo.type === TeamHandoffCard && handoffRedo.props.variant === 'redo' && handoffRedo.props.state === 'redo'
+    ? ok('TeamHandoffRedo delegates to TeamHandoffCard with variant=redo,state=redo')
+    : bad(`handoffRedo type=${handoffRedo?.type?.name ?? handoffRedo?.type} variant=${handoffRedo?.props?.variant}`);
+
+  // 9c) TeamPanel composes the subcomponents when given a runMeta
+  const panel = TeamPanel({
+    runMeta: {
+      id: 'run-test', state: 'running', degraded_flag: false, flow: 'handoff-round-table',
+      members: [{ member_id: 'brain', instance_alias: 'b' }, { member_id: 'critic', instance_alias: 'c' }],
+    },
+    waitingCount: 1, waitingKinds: ['convergence'],
+    recentHandoffs: [{ id: 'h1', from: 'brain', to: 'critic', state: 'in_flight' }],
+  });
+  panel && panel.props['data-run-id'] === 'run-test' && panel.props['data-state'] === 'running'
+    ? ok('TeamPanel renders with runMeta')
+    : bad(`panel=${JSON.stringify(panel)}`);
+
+  // 9d) TeamPanel with no runMeta shows the empty hint
+  const empty = TeamPanel({});
+  const emptyChildren = Array.isArray(empty?.props?.children)
+    ? empty.props.children.join(' ')
+    : (empty?.props?.children ?? '');
+  empty && empty.type === 'div' && /No active Team Run/.test(emptyChildren)
+    ? ok('TeamPanel empty state shows the hint')
+    : bad(`emptyChildren=${emptyChildren}`);
 
   console.log('');
   if (fail === 0) {

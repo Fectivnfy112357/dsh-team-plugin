@@ -1,50 +1,120 @@
 /**
- * team-panel.js — Slot registration for the Team Plugin UI.
+ * team-panel.js — slot registration for the Team Plugin UI.
  *
- * Per architecture.md §7.1, this plugin introduces two new slots:
+ * Per architecture.md §7.1: this plugin introduces two new slots
  *   - `team-panel`  (list)  — the常驻面板 root component
  *   - `team-config` (keyed) — the Team / Role / Member configuration centre
+ * and registers UI components on the existing `tool.call.toolview` /
+ * `conversation.chat.node` slots so handoff cards + decision badges
+ * appear in the main timeline.
  *
- * v1.0 scope: register the slots with placeholder components so the wiring
- * is in place. The actual rendered UI is P1+ work (Linear-flavoured app
- * shell, member chips, decision-point badge, handoff cards, handoff-redo
- * variant — see architecture §7.3 for the full list).
+ * v1.0 components (5):
+ *   - TeamPanel         (this file) — 常驻面板 root;renders member bar + timeline
+ *   - TeamMemberChip    (team-member-chip.js)
+ *   - TeamDecisionBadge (team-decision-badge.js)
+ *   - TeamHandoffCard   (team-handoff-card.js)
+ *   - TeamHandoffRedo   (team-handoff-redo.js)
  *
- * The DSH host's `ctx.slots.listSubTree()` will pick up these registrations
- * as soon as the plugin is loaded; the host renders them once a UI consumer
- * starts reading the slot.
+ * v1.0 doesn't subscribe to live Cordis events from the components; the
+ * panel reads `props.runMeta` (passed by the DSH host) and renders a
+ * snapshot. Live subscription lands in P1.5 via the on() helper that
+ * already exists in DecisionPointService.
  *
  * @module dsh-team-plugin/team-panel
  */
 
+import { createElement as h } from './_react.js';
+import { TeamMemberChip } from './team-member-chip.js';
+import { TeamDecisionBadge } from './team-decision-badge.js';
+import { TeamHandoffCard } from './team-handoff-card.js';
+import { TeamHandoffRedo } from './team-handoff-redo.js';
+
 /**
- * Minimal placeholder component. v1.0 uses `React.createElement` (per
- * dsh-dual-plugin-guide core-api.md) instead of JSX because Cordis plugins
- * are loaded into a non-transpilation context. When the UI layer is
- * implemented in P1, this stub will be replaced with a real component
- * that subscribes to `TeamService.runStore` and renders the active
- * Team list.
+ * Root panel. Renders the team header (name + flow + status), the member
+ * bar, the decision badge (if any), and the timeline stub.
  *
- * @param {Record<string, unknown>} [props]
- * @returns {unknown}
+ * @param {{
+ *   runMeta?: { id: string, state: string, degraded_flag: boolean, flow: string, members: Array<any> },
+ *   waitingCount?: number,
+ *   waitingKinds?: string[],
+ *   recentHandoffs?: Array<any>,
+ * }} props
  */
-function placeholderPanel(props) {
-  const React = /** @type {any} */ (globalThis).React;
-  if (typeof React?.createElement !== 'function') {
-    // Outside a React-loaded runtime (e.g. unit test), return a no-op marker
-    // that callers can identify.
-    return { __placeholder: 'team-panel', props: props ?? {} };
+export function TeamPanel(props) {
+  const { runMeta, waitingCount = 0, waitingKinds = [], recentHandoffs = [] } = props;
+  if (!runMeta) {
+    return h(
+      'div',
+      { className: 'dsh-team-panel-empty', style: { padding: 16, color: '#6b7280' } },
+      'No active Team Run. Use /start-team to begin.',
+    );
   }
-  return React.createElement(
+  return h(
     'div',
-    { 'data-dsh-team-panel': 'v1-stub', style: { padding: 8, color: '#888' } },
-    `DSH Team Panel — v1.0 P0 stub (props: ${Object.keys(props ?? {}).join(', ')})`,
+    {
+      className: 'dsh-team-panel',
+      'data-run-id': runMeta.id,
+      'data-state': runMeta.state,
+      style: { padding: 12, fontSize: 13, color: '#111827' },
+    },
+    h('div', { className: 'dsh-team-header', style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } },
+      h('strong', { style: { fontSize: 15 } }, `Team Run ${runMeta.id}`),
+      h('span', { 'data-flow': runMeta.flow, style: { color: '#6b7280' } }, runMeta.flow),
+      h('span', {
+        'data-state-pill': runMeta.state,
+        style: {
+          padding: '1px 8px',
+          borderRadius: 10,
+          background: stateColor(runMeta.state),
+          color: 'white',
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+        },
+      }, runMeta.state),
+      runMeta.degraded_flag
+        ? h('span', { 'data-degraded': true, style: { color: '#f59e0b', fontSize: 11 } }, '⚠ degraded')
+        : null,
+      h(TeamDecisionBadge, { waitingCount, kinds: waitingKinds, runId: runMeta.id }),
+    ),
+    h('div', { className: 'dsh-team-member-bar', style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 } },
+      ...(runMeta.members ?? []).map((m) =>
+        h(TeamMemberChip, {
+          key: m.member_id,
+          memberId: m.member_id,
+          displayName: m.instance_alias ?? m.member_id,
+          roleId: m.member_id,
+          adapter: m.adapter ?? 'hermes',
+          state: 'idle',
+        }),
+      ),
+    ),
+    h('div', { className: 'dsh-team-timeline', style: { borderTop: '1px solid #e5e7eb', paddingTop: 8 } },
+      ...(recentHandoffs ?? []).map((ho) =>
+        ho.state === 'redo'
+          ? h(TeamHandoffRedo, { key: ho.id, ...ho })
+          : h(TeamHandoffCard, { key: ho.id, ...ho }),
+      ),
+    ),
   );
 }
 
+function stateColor(state) {
+  return {
+    pending: '#9ca3af',
+    assembling: '#3b82f6',
+    running: '#22c55e',
+    succeeded: '#10b981',
+    failed: '#ef4444',
+    interrupted: '#f97316',
+    aborted: '#6b7280',
+    archived: '#4b5563',
+  }[state] ?? '#6b7280';
+}
+
 /**
- * Register all team-plugin slots against the host slot registry.
- * Effect-wrapped: the disposer from `ctx.slots.register(...)` runs when
+ * Register the team slots and the keyed component slot for handoff cards.
+ * Effect-wrapped; the disposer from `ctx.slots.register(...)` runs when
  * the Cordis plugin unloads.
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
@@ -54,37 +124,71 @@ export function registerTeamSlots(ctx) {
     ctx.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; slot registration skipped');
     return;
   }
-  // 常驻面板 (list) — collects sub-entries (chips / badges / cards) keyed
-  // by member_id / dispatch_id. The actual collection is a P1 concern; here
-  // we register an empty list slot so consumers can find it.
+  // team-panel slot (list): the常驻面板 root
   ctx.effect(() =>
     ctx.slots.register({
       name: 'team-panel',
       kind: 'list',
-      component: placeholderPanel,
+      component: TeamPanel,
       label: 'DSH Team',
     }),
   );
-  // Team 配置中心 (keyed) — Role / Member / Team-Template 编辑入口。P1+
-  // 实现真正的表单组件；这里只占位。
+  // team-config slot (keyed): Team / Role / Member / Team-Template edit
   ctx.effect(() =>
     ctx.slots.register({
       name: 'team-config',
       kind: 'keyed',
-      component: placeholderPanel,
+      component: TeamPanel,
       label: 'DSH Team Config',
     }),
   );
-  // settings 入口 — 让用户能在 DSH 的 settings 页面看到 "Team" 一项。
-  // 通过复用 `settings.section` slot（dsh-dual-plugin-guide/slots.md 推荐
-  // 入口），不需要新建顶层 slot。
+  // settings 入口: DSH 的 settings 页面看到 "Team" 一项
   ctx.effect(() =>
     ctx.slots.register({
       name: 'settings.section',
       kind: 'list',
-      component: placeholderPanel,
+      component: TeamPanel,
       label: 'Team',
       props: { sectionId: 'dsh-team', title: 'DSH Team Plugin' },
+    }),
+  );
+  // handoff / decision badge / member chip —— 通过 keyed 工具 view
+  // 暴露,让 tool.call.toolview <team-handoff>/<team-decision>/<team-member>
+  // 能找到组件。
+  ctx.effect(() =>
+    ctx.slots.register({
+      name: 'tool.call.toolview',
+      kind: 'keyed',
+      component: TeamHandoffCard,
+      entryKey: 'team-handoff',
+      label: 'Team Handoff Card',
+    }),
+  );
+  ctx.effect(() =>
+    ctx.slots.register({
+      name: 'tool.call.toolview',
+      kind: 'keyed',
+      component: TeamHandoffRedo,
+      entryKey: 'team-handoff-redo',
+      label: 'Team Handoff Redo Card',
+    }),
+  );
+  ctx.effect(() =>
+    ctx.slots.register({
+      name: 'tool.call.toolview',
+      kind: 'keyed',
+      component: TeamMemberChip,
+      entryKey: 'team-member-chip',
+      label: 'Team Member Chip',
+    }),
+  );
+  ctx.effect(() =>
+    ctx.slots.register({
+      name: 'tool.call.toolview',
+      kind: 'keyed',
+      component: TeamDecisionBadge,
+      entryKey: 'team-decision-badge',
+      label: 'Team Decision Badge',
     }),
   );
 }

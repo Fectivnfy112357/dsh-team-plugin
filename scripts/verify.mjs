@@ -49,13 +49,13 @@ for (const sub of ['services', 'ui']) {
   const d = join(root, sub);
   if (existsSync(d)) {
     const fs = readdirSync(d).filter((f) => f.endsWith('.js'));
-    if (fs.length === 0) warn(sub + '/ is empty (P1+ will fill this)');
+    if (fs.length === 0) warn(sub + '/ is empty (P1+ will fill this)'); for (const f of fs.filter((f) => f.endsWith('.jsx'))) ok(sub + '/' + f);
     for (const f of fs) ok(sub + '/' + f);
   } else fail(sub + '/ directory missing');
 }
 const libToolsDir = join(root, 'lib', 'tools');
 if (existsSync(libToolsDir)) {
-  for (const f of readdirSync(libToolsDir).filter((f) => f.endsWith('.js'))) {
+  for (const f of readdirSync(libToolsDir).filter((f) => f.endsWith('.js') || f.endsWith('.jsx'))) {
     ok('lib/tools/' + f);
   }
 }
@@ -102,7 +102,7 @@ function checkJsDir(dir, prefix) {
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) {
       checkJsDir(p, prefix + entry + '/');
-    } else if (entry.endsWith('.js') || entry.endsWith('.mjs')) {
+    } else if (entry.endsWith('.js') || entry.endsWith('.mjs') || entry.endsWith('.jsx')) {
       const r = spawnSync(process.execPath, ['--check', p], { encoding: 'utf8' });
       if (r.status === 0) ok(prefix + entry);
       else fail(prefix + entry + ': ' + r.stderr.trim().split('\n').pop());
