@@ -35,7 +35,7 @@ async function importService(rel) {
 
 try {
   // ---- paths.js ----
-  console.log('[1/4] paths.js');
+  console.log('[1/8] paths.js');
   const { resolveTeamPaths, runDir } = await importService('services/paths.js');
   const paths = resolveTeamPaths();
   paths.teamRunsDir === join(tmp, '.dsh', 'team-runs')
@@ -46,7 +46,7 @@ try {
     : bad(`globalRoot = ${paths.globalRoot}`);
 
   // ---- log-writer.js ----
-  console.log('\n[2/4] log-writer.js');
+  console.log('\n[2/8] log-writer.js');
   const { appendLog, writeJsonFile } = await importService('services/log-writer.js');
   // Pre-create run dir so appendLog can find it (service normally ensures this)
   const runId0 = 'smoke-pre';
@@ -72,7 +72,7 @@ try {
   allValid ? ok('all 20 entries parse and have unique ids') : bad('overwrite or invalid JSON detected');
 
   // ---- team-service.js: happy path + illegal transition ----
-  console.log('\n[3/4] team-service.js');
+  console.log('\n[3/8] team-service.js');
   const ts = await importService('services/team-service.js');
   const meta = await ts.start({
     taskDescription: 'smoke test',
@@ -129,7 +129,7 @@ try {
     : bad(`state-history reasons = ${histReasons}`);
 
   // ---- reconcileOnBoot ----
-  console.log('\n[4/4] reconcileOnBoot');
+  console.log('\n[4/8] reconcileOnBoot');
   // Create a second run that pretends to be held by a different (dead) process
   const orphanMeta = await ts.start({
     taskDescription: 'orphan test',
@@ -146,6 +146,140 @@ try {
   reloadedOrphan?.state === 'interrupted'
     ? ok('orphan run is now state=interrupted')
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
+
+  // ---- 5. DecisionPointService ----
+  console.log('\n[5/8] DecisionPointService');
+  const dpSvc = await importService('services/decision-point-service.js');
+  dpSvc._resetForTests();
+  // Create a run + members so the DP has context
+  const dpRunMeta = await ts.start({
+    taskDescription: 'DP test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 3 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const dpRunId = dpRunMeta.id;
+  await ts.markHolder(dpRunId);
+  // Open
+  const dp1 = await dpSvc.open({ runId: dpRunId, kind: 'convergence', prompt: 'ok?' });
+  dp1.status === 'open' ? ok('open() -> status=open') : bad(`dp1.status=${dp1.status}`);
+  typeof dp1.id === 'string' && dp1.id.startsWith('dp-')
+    ? ok('dp.id has the expected prefix')
+    : bad(`dp.id=${dp1.id}`);
+  // Idempotency: a second open of the same kind on the same run returns the same DP
+  const dp1b = await dpSvc.open({ runId: dpRunId, kind: 'convergence', prompt: 'ok?' });
+  dp1b.id === dp1.id ? ok('open() is idempotent per (run, kind)') : bad(`got new id ${dp1b.id}`);
+  // waitingDecisions
+  const waiting = dpSvc.waitingDecisions(dpRunId);
+  waiting.length === 1 ? ok('waitingDecisions() finds the open DP') : bad(`waiting=${waiting.length}`);
+  // Respond
+  const responded = await dpSvc.respond(dp1.id, { action: 'continue', feedback: 'more detail please' });
+  responded.status === 'responded' ? ok('respond() -> status=responded') : bad(`status=${responded.status}`);
+  responded.response?.action === 'continue' ? ok('response.action=continue') : bad(`action=${responded.response?.action}`);
+  responded.response?.feedback === 'more detail please' ? ok('response.feedback preserved verbatim') : bad('feedback mismatch');
+  // user-intervention-log was written
+  const uiLines = readFileSync(join(paths.teamRunsDir, dpRunId, 'user-intervention-log.jsonl'), 'utf-8').trim().split('\n');
+  uiLines.length === 1 ? ok('user-intervention-log has 1 entry') : bad(`uiLines.length=${uiLines.length}`);
+  const uiEntry = JSON.parse(uiLines[0]);
+  uiEntry.decision_point_id === dp1.id && uiEntry.action === 'continue' && uiEntry.is_ad_hoc === false
+    ? ok('user-intervention-log entry shape correct')
+    : bad(`uiEntry=${JSON.stringify(uiEntry)}`);
+  // waitingDecisions is now empty
+  dpSvc.waitingDecisions(dpRunId).length === 0 ? ok('waitingDecisions() empty after respond') : bad('still has open DP');
+
+  // ---- 6. MessageService ----
+  console.log('\n[6/8] MessageService');
+  const msgSvc = await importService('services/message-service.js');
+  msgSvc._resetForTests();
+  const sentMsg = await msgSvc.send({
+    runId: dpRunId,
+    from: 'brain',
+    to: 'brain',
+    topic: 'self-check',
+    intent: 'note',
+    payload: { body: 'remember to consider Y' },
+  });
+  sentMsg.kind === 'message' && typeof sentMsg.id === 'string' ? ok('send() -> message entry') : bad(`sentMsg=${JSON.stringify(sentMsg)}`);
+  // inbox: brain's session-state.json (created by markHolder) should have the msg id
+  const brainState = JSON.parse(readFileSync(join(paths.teamRunsDir, dpRunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  brainState.inbox?.pending?.includes(sentMsg.id)
+    ? ok('receiver inbox.pending contains the message id')
+    : bad(`brain inbox=${JSON.stringify(brainState.inbox)}`);
+  // a2a-message-log has the entry
+  const a2aLines = readFileSync(join(paths.teamRunsDir, dpRunId, 'a2a-message-log.jsonl'), 'utf-8').trim().split('\n');
+  JSON.parse(a2aLines[a2aLines.length - 1]).id === sentMsg.id
+    ? ok('a2a-message-log appended the message')
+    : bad('a2a-message-log tail mismatch');
+  // wake dedup: 2nd wake within 5s should be suppressed
+  msgSvc.shouldWake(dpRunId, 'brain') === false
+    ? ok('wake dedup: 2nd wake within 5s is suppressed')
+    : bad('wake dedup not working');
+  msgSvc.shouldWake(dpRunId, 'other') === true
+    ? ok('wake dedup: different target wakes normally')
+    : bad('wake dedup blocks unrelated target');
+
+  // ---- 7. RoundTableFlow ----
+  console.log('\n[7/8] RoundTableFlow');
+  const flowSvc = await importService('services/flow-engine.js');
+  const rtRunMeta = await ts.start({
+    taskDescription: 'round-table test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 2 },
+    members: [
+      { member_id: 'brain', instance_alias: 'b' },
+      { member_id: 'critic', instance_alias: 'c' },
+    ],
+  });
+  const rtRunId = rtRunMeta.id;
+  await ts.markHolder(rtRunId);
+  await ts.transition(rtRunId, 'pending', 'assembling', 'team-formed');
+  // Simulate a member posting a conclusion message (the real flow reads a2a-message-log)
+  await msgSvc.send({
+    runId: rtRunId,
+    from: 'critic',
+    to: 'brain',
+    topic: 'conclusion',
+    intent: 'conclude',
+    payload: { conclusion: 'we agree the answer is X' },
+  });
+  // Kick off the flow (don't await — it will block on the DP)
+  const flowPromise = flowSvc.run(rtRunId, null);
+  // Give the flow a moment to reach the convergence DP
+  await new Promise((r) => setTimeout(r, 100));
+  // Find the convergence DP and respond with 'complete'
+  const convDp = dpSvc.waitingDecisions(rtRunId).find((d) => d.kind === 'convergence');
+  convDp ? ok('convergence DP opened by flow engine') : bad('no convergence DP');
+  if (convDp) {
+    await dpSvc.respond(convDp.id, { action: 'complete' });
+    // Wait for flow to settle
+    const result = await flowPromise;
+    result.terminal === 'succeeded' ? ok('flow terminal=succeeded after user complete') : bad(`terminal=${result.terminal}`);
+  }
+  // meta.json reflects the terminal state
+  const finalMeta = await ts.readMeta(rtRunId);
+  finalMeta.state === 'succeeded' ? ok('meta.state=succeeded after flow') : bad(`state=${finalMeta.state}`);
+
+  // ---- 8. setDegraded ----
+  console.log('\n[8/8] setDegraded');
+  const degRunMeta = await ts.start({
+    taskDescription: 'degraded test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const degRunId = degRunMeta.id;
+  await ts.transition(degRunId, 'pending', 'assembling', 'ready');
+  await ts.transition(degRunId, 'assembling', 'running', 'go');
+  const deg = await ts.setDegraded(degRunId, 'member-brain-down');
+  deg.degraded_flag === true ? ok('setDegraded flips degraded_flag') : bad(`flag=${deg.degraded_flag}`);
+  // Idempotency
+  const deg2 = await ts.setDegraded(degRunId, 'second-attempt');
+  deg2.degraded_flag === true ? ok('setDegraded is idempotent') : bad('flag cleared on second call');
+  // state-history has a degraded-flag-set entry
+  const shLines = readFileSync(join(paths.teamRunsDir, degRunId, 'state-history.jsonl'), 'utf-8').trim().split('\n');
+  /degraded-flag-set:member-brain-down/.test(shLines.join('\n'))
+    ? ok('state-history records degraded-flag-set with reason')
+    : bad('degraded-flag-set reason not in state-history');
 
   console.log('');
   if (fail === 0) {

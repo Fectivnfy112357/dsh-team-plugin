@@ -105,7 +105,7 @@ function makeInitialMeta(req, runId) {
  * @param {string} runId
  * @param {TeamRunMeta} meta
  */
-async function writeMeta(runId, meta) {
+export async function writeMeta(runId, meta) {
   await writeJsonFile(join(runDir(runId), 'meta.json'), meta);
 }
 
@@ -240,6 +240,34 @@ export async function list(opts = {}) {
     out.push(meta);
   }
   return out.sort((a, b) => (b.created_at > a.created_at ? 1 : -1));
+}
+
+/**
+ * Set the degraded flag on a running run (architecture §8.3). The flag is
+ * a meta.json modifier, NOT a state transition — the run stays at
+ * state=running and the flag records that ≥1 (non-all) member is
+ * unrecoverable. The state machine will let the run proceed to
+ * succeeded(partial) at the end if appropriate.
+ * @param {string} runId
+ * @param {string} reason
+ */
+export async function setDegraded(runId, reason) {
+  const cur = await readMeta(runId);
+  if (!cur) throw new Error(`team-service.setDegraded: run ${runId} not found`);
+  if (cur.state !== 'running') {
+    throw new Error(`team-service.setDegraded: run ${runId} is not running (state=${cur.state})`);
+  }
+  if (cur.degraded_flag) return cur; // idempotent
+  // log the flag transition (no state change; reason captured for audit)
+  await appendLog('state-history', runId, {
+    from_state: 'running',
+    to_state: 'running',
+    reason: `degraded-flag-set:${reason}`,
+    timestamp: new Date().toISOString(),
+  });
+  const next = { ...cur, degraded_flag: true };
+  await writeMeta(runId, next);
+  return next;
 }
 
 /**
