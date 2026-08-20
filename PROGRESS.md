@@ -113,7 +113,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **依赖**: 无前置 (独立模块)
 
-#### #4 pipeline-with-feedback step handoff → next step context_refs 传播
+#### #4 pipeline-with-feedback step handoff → next step context_refs 传播 — ✅ 完成 (commit `fe38a78`)
 
 **Why deferred**: v1.0 `services/pipeline-flow.js#runPipeline` 在 `signalStepTerminal` 收 `produced_artifact_ids` 后**没**自动带入下一步 dispatch 的 `context_refs`;`§4.7.2` 流程图也只写「查 plan 后派单」未明文规定 context 传递语义。fan-out §4.7.3 已经显式写了 `aggregator context_refs = completed_members.artifacts`,pipeline 写法不一致,产物跨步传递不显式。
 
