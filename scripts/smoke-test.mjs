@@ -528,6 +528,11 @@ try {
     JSON.stringify({ id: 'brain', role_id: 'brain', display_name: 'Brain', persona: '', adapter: 'hermes' }),
     'utf-8',
   );
+  await _writeFile(
+    join(membersDir, 'critic.json'),
+    JSON.stringify({ id: 'critic', role_id: 'critic', display_name: 'Critic', persona: '', adapter: 'hermes' }),
+    'utf-8',
+  );
   // Build a run + skeleton session-state for the test
   const memberRunMeta = await ts.start({
     taskDescription: 'member test', flow: 'handoff-round-table',
@@ -617,6 +622,215 @@ try {
   leave2.state === 'terminated' && interruptCalls.length === 1
     ? ok('leaveRun is idempotent: re-leave does not re-interrupt')
     : bad(`leave2=${JSON.stringify(leave2)} interruptCalls=${interruptCalls.length}`);
+
+  // ---- 9j. MemberService.sendMessage / dispatch / wake / triggerSelfHandoff (2.0 #1 留口 #2) ----
+  console.log('\n[9j] MemberService.sendMessage / dispatch / wake / triggerSelfHandoff');
+  memberSvc._resetForTests();
+  // Set up a fresh run with 2 members joined: 'brain' (sender) and 'critic' (recipient).
+  // The mock ctx records followup / startContinuable / interrupt calls.
+  const followupCalls = [];
+  const startCalls2 = [];
+  const interruptCalls2 = [];
+  const ctxMs2 = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        startCalls2.push(spec);
+        return { childId: `child-${startCalls2.length}-${Date.now().toString(36)}`, messageId: `msg-${startCalls2.length}-${Date.now().toString(36)}` };
+      },
+      followup: async (parent, childId, content, options) => {
+        followupCalls.push({ parent, childId, content, options });
+        return `fup-${followupCalls.length}-${Date.now().toString(36)}`;
+      },
+      interrupt: async (targetSessionId, authority) => {
+        interruptCalls2.push({ targetSessionId, authority });
+      },
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+  };
+  // New run with both members
+  const ms2Meta = await ts.start({
+    taskDescription: 'ms2 test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [
+      { member_id: 'brain', instance_alias: 'b' },
+      { member_id: 'critic', instance_alias: 'c' },
+    ],
+  });
+  const ms2RunId = ms2Meta.id;
+  await ts.markHolder(ms2RunId);
+  // Pre-join both members so the recipient is 'running' for the followup
+  // tests below. joinRun inside this test doesn't pollute the prior ctx
+  // because we use a separate ctxMs2 (mock counts are separate).
+  const brainJoin = await memberSvc.joinRun(ctxMs2, ms2RunId, 'brain', { signal: new AbortController().signal });
+  const criticJoin = await memberSvc.joinRun(ctxMs2, ms2RunId, 'critic', { signal: new AbortController().signal });
+  brainJoin.state === 'running' && criticJoin.state === 'running'
+    ? ok('pre-join: both members in state=running')
+    : bad(`brainJoin=${JSON.stringify(brainJoin)} criticJoin=${JSON.stringify(criticJoin)}`);
+
+  // ---- sendMessage: brain -> critic ----
+  const sendBefore = followupCalls.length;
+  const smResult = await memberSvc.sendMessage(ctxMs2, ms2RunId, 'brain', {
+    to: 'critic',
+    topic: 'clarify',
+    intent: 'request-info',
+    payload: { q: 'what about X?' },
+  }, { parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } } });
+  smResult.entry?.id && smResult.entry.kind === 'message' && smResult.entry.from === 'brain' && smResult.entry.to === 'critic'
+    ? ok('sendMessage returns a2a entry with from=brain to=critic kind=message')
+    : bad(`smResult.entry=${JSON.stringify(smResult.entry)}`);
+  // a2a-message-log has 1 row
+  const a2aMs2Lines = readFileSync(join(paths.teamRunsDir, ms2RunId, 'a2a-message-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  a2aMs2Lines.length === 1 && a2aMs2Lines[0].id === smResult.entry.id
+    ? ok('a2a-message-log has 1 row matching the entry id')
+    : bad(`a2aMs2Lines=${JSON.stringify(a2aMs2Lines)}`);
+  // critic inbox has the message pending
+  const criticInbox = JSON.parse(readFileSync(join(paths.teamRunsDir, ms2RunId, 'sessions', 'critic', 'session-state.json'), 'utf-8'));
+  criticInbox.inbox?.pending?.includes(smResult.entry.id)
+    ? ok("critic's session-state.json inbox.pending contains the message id")
+    : bad(`criticInbox.inbox=${JSON.stringify(criticInbox.inbox)}`);
+  // followup was called on critic's child
+  followupCalls.length === sendBefore + 1 && followupCalls[followupCalls.length - 1].childId === criticJoin.childId
+    ? ok('sendMessage fired ctx.subagents.followup against critic.child_id')
+    : bad(`followupCalls tail=${JSON.stringify(followupCalls.at(-1))}`);
+  // brain inbox should NOT have the message (sender doesn't get their own)
+  const brainInbox = JSON.parse(readFileSync(join(paths.teamRunsDir, ms2RunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  !brainInbox.inbox?.pending?.includes(smResult.entry.id)
+    ? ok("brain's inbox does NOT contain the message it sent")
+    : bad(`brain inbox unexpectedly contains ${smResult.entry.id}`);
+
+  // ---- sendMessage: broadcast does NOT call followup ----
+  const followupBeforeBroadcast = followupCalls.length;
+  await memberSvc.sendMessage(ctxMs2, ms2RunId, 'brain', {
+    to: 'broadcast',
+    topic: 'announce',
+    intent: 'notify',
+    payload: { text: 'hi all' },
+  });
+  followupCalls.length === followupBeforeBroadcast
+    ? ok('sendMessage to broadcast does NOT call followup (each member reads its own inbox)')
+    : bad(`followup calls after broadcast = ${followupCalls.length - followupBeforeBroadcast}`);
+
+  // ---- dispatch: auto-joins if not running, follows up with task ----
+  memberSvc._resetForTests();
+  // Use a brand-new run with a fresh member to test the auto-join branch
+  const dispatchMeta = await ts.start({
+    taskDescription: 'dispatch test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const dispatchRunId = dispatchMeta.id;
+  await ts.markHolder(dispatchRunId);
+  const startBeforeDispatch = startCalls2.length;
+  const followupBeforeDispatch = followupCalls.length;
+  const dispatchResult = await memberSvc.dispatch(ctxMs2, dispatchRunId, 'brain', {
+    task: 'first dispatch task',
+    contextRefs: ['art-1', 'art-2'],
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+  });
+  dispatchResult.joinedNow === true && startCalls2.length === startBeforeDispatch + 1
+    ? ok('dispatch auto-joins an unjoined member (joinedNow=true, startContinuable called)')
+    : bad(`dispatchResult.joinedNow=${dispatchResult.joinedNow} startCalls added=${startCalls2.length - startBeforeDispatch}`);
+  followupCalls.length === followupBeforeDispatch + 1
+    ? ok('dispatch calls followup after (auto-)join')
+    : bad(`followupCalls added=${followupCalls.length - followupBeforeDispatch}`);
+  // dispatch-log has a row with from=scheduler to=brain
+  const dispatchLog = readFileSync(join(paths.teamRunsDir, dispatchRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const dRow = dispatchLog.find((r) => r.from === 'scheduler' && r.to === 'brain' && r.task === 'first dispatch task');
+  dRow && Array.isArray(dRow.context_refs) && dRow.context_refs.length === 2
+    ? ok('dispatch-log has scheduler->brain row with 2 context_refs')
+    : bad(`dRow=${JSON.stringify(dRow)}`);
+
+  // ---- dispatch: idempotent (already joined -> no second startContinuable) ----
+  const startBeforeDispatch2 = startCalls2.length;
+  const dispatchResult2 = await memberSvc.dispatch(ctxMs2, dispatchRunId, 'brain', {
+    task: 'second dispatch',
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+  });
+  dispatchResult2.joinedNow === false && startCalls2.length === startBeforeDispatch2
+    ? ok('dispatch is idempotent: already-joined member gets followup only (no second startContinuable)')
+    : bad(`dispatchResult2.joinedNow=${dispatchResult2.joinedNow} startCalls added=${startCalls2.length - startBeforeDispatch2}`);
+
+  // ---- wake: force-wake, no dedup, calls followup ----
+  memberSvc._resetForTests();
+  const wakeBefore = followupCalls.length;
+  const wakeResult = await memberSvc.wake(ctxMs2, ms2RunId, 'critic', {
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+    reason: 'kick-test',
+  });
+  wakeResult.dispatched === true && followupCalls.length === wakeBefore + 1
+    ? ok('wake fires followup on the live child (no dedup)')
+    : bad(`wakeResult=${JSON.stringify(wakeResult)} followup added=${followupCalls.length - wakeBefore}`);
+  // Two wakes in quick succession should both dispatch (no dedup)
+  const wakeBefore2 = followupCalls.length;
+  await memberSvc.wake(ctxMs2, ms2RunId, 'critic', {
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+    reason: 'kick-test-2',
+  });
+  followupCalls.length === wakeBefore2 + 1
+    ? ok('wake does NOT dedup: two rapid wakes both fire followup')
+    : bad(`second wake followup added=${followupCalls.length - wakeBefore2}`);
+  // wake with no parent or no live child returns dispatched=false
+  const wakeDead = await memberSvc.wake(ctxMs2, ms2RunId, 'nonexistent-member', {
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+  });
+  wakeDead.dispatched === false
+    ? ok('wake to non-joined member returns dispatched=false (no followup)')
+    : bad(`wakeDead=${JSON.stringify(wakeDead)}`);
+
+  // ---- triggerSelfHandoff: interrupts old child, starts new, chain-append ----
+  memberSvc._resetForTests();
+  const handoffBefore = {
+    start: startCalls2.length,
+    interrupt: interruptCalls2.length,
+  };
+  // ms2 still has 'brain' running from earlier. Trigger its self-handoff.
+  const brainSessionBefore = JSON.parse(readFileSync(join(paths.teamRunsDir, ms2RunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  const oldChildId = brainSessionBefore.current_session_id;
+  const oldChainLen = (brainSessionBefore.session_chain ?? []).length;
+  const oldCount = brainSessionBefore.self_handoff_count ?? 0;
+  const handoffResult = await memberSvc.triggerSelfHandoff(ctxMs2, ms2RunId, 'brain', {
+    reason: 'context-overflow',
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+    handoffFile: 'handoff-1.md',
+    promptOverride: [
+      { type: 'text', text: '[persona]\n[handoff-1.md content]\n[task: continue with X]' },
+    ],
+  });
+  interruptCalls2.length === handoffBefore.interrupt + 1 && interruptCalls2.at(-1).targetSessionId === oldChildId
+    ? ok('triggerSelfHandoff interrupts the old child')
+    : bad(`interrupt added=${interruptCalls2.length - handoffBefore.interrupt} target=${interruptCalls2.at(-1)?.targetSessionId}`);
+  startCalls2.length === handoffBefore.start + 1
+    ? ok('triggerSelfHandoff calls startContinuable for the new child')
+    : bad(`start added=${startCalls2.length - handoffBefore.start}`);
+  handoffResult.handoffCount === oldCount + 1
+    ? ok('handoffCount is incremented')
+    : bad(`handoffCount=${handoffResult.handoffCount} oldCount=${oldCount}`);
+  // session-state.json: new current_session_id, session_chain append, handoff_files append, self_handoff_count bumped
+  const brainSessionAfter = JSON.parse(readFileSync(join(paths.teamRunsDir, ms2RunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  brainSessionAfter.current_session_id === handoffResult.newChildId && brainSessionAfter.current_session_id !== oldChildId
+    ? ok('session-state.json current_session_id replaced with new child')
+    : bad(`current_session_id=${brainSessionAfter.current_session_id} newChildId=${handoffResult.newChildId} oldChildId=${oldChildId}`);
+  brainSessionAfter.session_chain.length === oldChainLen + 1 && brainSessionAfter.session_chain.includes(handoffResult.newChildId)
+    ? ok('session-state.json session_chain has +1 entry including newChildId')
+    : bad(`chain len=${brainSessionAfter.session_chain.length} oldLen=${oldChainLen}`);
+  brainSessionAfter.handoff_files?.includes('handoff-1.md')
+    ? ok('session-state.json handoff_files includes handoff-1.md')
+    : bad(`handoff_files=${JSON.stringify(brainSessionAfter.handoff_files)}`);
+  brainSessionAfter.state === 'running'
+    ? ok('state stays running across the self-handoff (member is the same entity)')
+    : bad(`state=${brainSessionAfter.state}`);
+  // dispatch-log has a member-self-handoff row
+  const ms2Dl = readFileSync(join(paths.teamRunsDir, ms2RunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const handoffRow = ms2Dl.find((r) => r.kind === 'member-self-handoff' && r.to === 'brain');
+  handoffRow && handoffRow.child_id_old === oldChildId && handoffRow.child_id === handoffResult.newChildId && handoffRow.handoff_file === 'handoff-1.md'
+    ? ok('dispatch-log has member-self-handoff row with child_id_old/new + handoff_file')
+    : bad(`handoffRow=${JSON.stringify(handoffRow)}`);
 
   // ---- 9i. Cross-plugin service bundle (2.0 #3) ----
   console.log('\n[9i] Cross-plugin service bundle (2.0 #3)');
