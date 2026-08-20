@@ -12,6 +12,15 @@
  *   - 更新 receiver 的 session-state.json inbox (pending / processed)
  *   - wake 去重:in-memory map per (runId, toMemberId),TTL = WAKE_DEDUP_SECONDS
  *
+ * v2.0 P2 抛光 (this revision):
+ *   - A2A payload 大小上限 (A2A_PAYLOAD_MAX_BYTES = 1 MiB)。架构层面
+ *     DSH 不读 payload,只搬运 + 投递 inbox;但 a2a-message-log.jsonl
+ *     是 append-only 文件,异常大 payload(成员 bug / 攻击)会让单条
+ *     日志条目的 JSON.stringify + writeFile 阻塞 DSH 主循环。上限
+ *     在 `send` 入口抛 `MessagePayloadTooLargeError`,调用方可以
+ *     选择 split / truncate / 重提。架构 §9.4 没硬定具体值,1 MiB
+ *     是经验值(远大于正常 A2A 消息;对齐常见 ACP message 单条上限)
+ *
  * @module dsh-team-plugin/message-service
  */
 import { existsSync } from 'node:fs';
@@ -19,6 +28,24 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { appendLog } from './log-writer.js';
 import { sessionDir } from './paths.js';
+
+/** Max bytes for a single A2A message's `payload` field (serialised JSON
+ * length). 1 MiB by default — covers real A2A messages comfortably while
+ * preventing the a2a-message-log.jsonl append path from being held by
+ * a single oversized entry. Exported for tests. */
+export const A2A_PAYLOAD_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Thrown by `send` when the serialised payload exceeds `A2A_PAYLOAD_MAX_BYTES`.
+ * Subclass so callers can catch just the size-exceeded case without
+ * pattern-matching the message string.
+ */
+export class MessagePayloadTooLargeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'MessagePayloadTooLargeError';
+  }
+}
 
 /** @typedef {{
  *   id: string,
@@ -148,6 +175,12 @@ export function shouldWake(runId, to) {
  * opaque to the dispatcher; only the receiver's LLM reads it via the inbox
  * + the followup prompt that includes the message summary.
  *
+ * v2.0 P2 抛光: enforces `A2A_PAYLOAD_MAX_BYTES` on the serialised
+ * payload length. Throws `MessagePayloadTooLargeError` when exceeded;
+ * the caller (or the upstream flow) can choose to split / truncate /
+ * re-issue. The check is on the JSON length, not the raw input size,
+ * to match what gets written to a2a-message-log.jsonl.
+ *
  * @param {SendRequest} req
  * @returns {Promise<A2AMessageLogEntry>}
  */
@@ -160,6 +193,15 @@ export async function send(req) {
   }
   if (typeof req.intent !== 'string' || req.intent.length === 0) {
     throw new Error('message-service.send: intent is required');
+  }
+  // v2.0 P2 抛光: payload size guard. Compute on the actual serialised
+  // length (matches the bytes written to a2a-message-log.jsonl) so the
+  // limit reflects real on-disk cost, not a fuzzy user-input estimate.
+  const serialisedPayload = JSON.stringify(req.payload ?? null);
+  if (serialisedPayload.length > A2A_PAYLOAD_MAX_BYTES) {
+    throw new MessagePayloadTooLargeError(
+      `message-service.send: payload size ${serialisedPayload.length}B exceeds A2A_PAYLOAD_MAX_BYTES=${A2A_PAYLOAD_MAX_BYTES}`,
+    );
   }
   const entry = {
     id: newMsgId(req.runId),

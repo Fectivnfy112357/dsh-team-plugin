@@ -265,6 +265,73 @@ try {
     ? ok('wake dedup: different target wakes normally')
     : bad('wake dedup blocks unrelated target');
 
+  // ---- 6b. MessageService: 2.0 P2 抛光 A2A payload size limit ----
+  console.log('\n[6b/19] MessageService (2.0 P2 payload size limit)');
+  msgSvc._resetForTests();
+  // Normal-sized payload: passes (use brain->brain since the DP test
+  // already has a session-state.json for brain)
+  const normalSizeMsg = await msgSvc.send({
+    runId: dpRunId,
+    from: 'brain',
+    to: 'brain',
+    topic: 'normal-payload',
+    intent: 'note',
+    payload: { body: 'x'.repeat(1024) },  // 1 KB
+  });
+  normalSizeMsg?.id
+    ? ok('send() accepts a 1 KB payload (well under the 1 MiB cap)')
+    : bad('normal-payload rejected');
+  // Boundary: serialised payload just under the cap
+  const exactBoundaryPayload = { data: 'x'.repeat(msgSvc.A2A_PAYLOAD_MAX_BYTES - 20) };
+  const boundaryJsonLen = JSON.stringify(exactBoundaryPayload).length;
+  boundaryJsonLen <= msgSvc.A2A_PAYLOAD_MAX_BYTES
+    ? ok(`exact-boundary payload (serialised ${boundaryJsonLen}B) under cap ${msgSvc.A2A_PAYLOAD_MAX_BYTES}B`)
+    : bad(`boundary oversize: ${boundaryJsonLen}B > ${msgSvc.A2A_PAYLOAD_MAX_BYTES}B`);
+  const exactBoundaryMsg = await msgSvc.send({
+    runId: dpRunId,
+    from: 'brain',
+    to: 'brain',
+    topic: 'boundary-payload',
+    intent: 'note',
+    payload: exactBoundaryPayload,
+  });
+  exactBoundaryMsg?.id
+    ? ok('send() accepts a payload at the exact cap boundary')
+    : bad('exact-boundary rejected');
+  // Over the cap: throws MessagePayloadTooLargeError
+  let tooLargeErr = null;
+  try {
+    await msgSvc.send({
+      runId: dpRunId,
+      from: 'brain',
+      to: 'brain',
+      topic: 'too-large',
+      intent: 'note',
+      payload: { data: 'x'.repeat(msgSvc.A2A_PAYLOAD_MAX_BYTES + 1) },
+    });
+  } catch (e) { tooLargeErr = e; }
+  tooLargeErr && tooLargeErr.name === 'MessagePayloadTooLargeError'
+    ? ok('send() throws MessagePayloadTooLargeError on payload > A2A_PAYLOAD_MAX_BYTES')
+    : bad(`tooLargeErr=${tooLargeErr?.message}`);
+  /exceeds A2A_PAYLOAD_MAX_BYTES/.test(String(tooLargeErr?.message ?? ''))
+    ? ok('error message includes the cap value for diagnostic clarity')
+    : bad(`error message does not mention cap: ${tooLargeErr?.message}`);
+  // Over-cap send did NOT write to a2a-message-log (the throw is at
+  // the entry, before appendLog). Verify by reading the log.
+  const a2aAfterOversize = readFileSync(join(paths.teamRunsDir, dpRunId, 'a2a-message-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  !a2aAfterOversize.some((m) => m.topic === 'too-large')
+    ? ok('oversize payload did NOT leak into a2a-message-log.jsonl (fail-fast at send entry)')
+    : bad('oversize message leaked into a2a log');
+  // Over-cap send did NOT touch any inbox either
+  const brainStateAfter = JSON.parse(readFileSync(join(paths.teamRunsDir, dpRunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  !brainStateAfter.inbox?.pending?.some((id) => a2aAfterOversize.find((m) => m.id === id && m.topic === 'too-large'))
+    ? ok('oversize payload did NOT touch recipient inbox (no partial side effects)')
+    : bad('oversize touched inbox');
+  // A2A_PAYLOAD_MAX_BYTES is a constant — verify it's the documented 1 MiB
+  msgSvc.A2A_PAYLOAD_MAX_BYTES === 1024 * 1024
+    ? ok('A2A_PAYLOAD_MAX_BYTES = 1 MiB (1024 * 1024) — matches the documented cap')
+    : bad(`cap is ${msgSvc.A2A_PAYLOAD_MAX_BYTES}, expected ${1024 * 1024}`);
+
   // ---- 7. RoundTableFlow ----
   console.log('\n[7/19] RoundTableFlow');
   const flowSvc = await importService('services/flow-engine.js');
@@ -1795,6 +1862,103 @@ try {
     ? ok('refCount=0 for unknown ref')
     : bad('refCount should be 0 for unknown ref');
   artSvc._resetIndexForTests();
+
+  // ---- 17d. team.delete_artifact: P2 抛光 cross-Run 引用硬删兜底 ----
+  console.log('\n[17d/19] team.delete_artifact (P2 hard-delete guard)');
+  artSvc._resetIndexForTests();
+  // Find the team.delete_artifact tool
+  const teamDel = teamTools.find((t) => t.name === 'team.delete_artifact');
+  teamDel && teamDel.execute
+    ? ok('team.delete_artifact tool is registered with an execute function')
+    : bad('team.delete_artifact missing execute');
+  // Set up: run A has artifact a-del-1; run B references it in derived_from
+  const delAMeta = await ts.start({ taskDescription: 'del-a', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+  const delAId = delAMeta.id;
+  const delAFullPath = join(paths.teamRunsDir, delAId, 'sessions', 'm', 'artifacts', 'a-del-1.md');
+  // Write the actual file (the tool unlinks it after manifest removal)
+  const { mkdir: _mkdir } = await import('node:fs/promises');
+  await _mkdir(join(paths.teamRunsDir, delAId, 'sessions', 'm', 'artifacts'), { recursive: true });
+  await _writeFile(delAFullPath, '# a-del-1 contents', 'utf-8');
+  await artSvc.register({
+    id: 'a-del-1', run_id: delAId, type: 'doc', file: 'sessions/m/artifacts/a-del-1.md',
+    produced_by: 'm', member_id: 'm', derived_from: [],
+  });
+  const delBMeta = await ts.start({ taskDescription: 'del-b', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+  await ts.markHolder(delBMeta.id);
+  await artSvc.register({
+    id: 'b-del-1', run_id: delBMeta.id, type: 'doc', file: 'sessions/m/artifacts/b-del-1.md',
+    produced_by: 'm', member_id: 'm', derived_from: [`${delAId}/a-del-1`],
+  });
+  // 17d-1) canDelete=false because b-del-1 references a-del-1
+  (await artSvc.canDelete(`${delAId}/a-del-1`)) === false
+    ? ok('pre-delete: a-del-1 has 1 cross-Run ref -> canDelete=false')
+    : bad('canDelete should be false (ref exists)');
+  // 17d-2) team.delete_artifact refuses (refuses=true, deleted=false)
+  const refused = await teamDel.execute({ runId: delAId, artifactId: 'a-del-1' });
+  refused.deleted === false
+    ? ok('team.delete_artifact refuses when refs exist (deleted=false)')
+    : bad(`deleted=${refused.deleted}`);
+  refused.refCountAtDelete === 1
+    ? ok('team.delete_artifact reports refCountAtDelete=1 on refusal')
+    : bad(`refCountAtDelete=${refused.refCountAtDelete}`);
+  // 17d-3) Manifest entry still exists, file still on disk
+  const manifestAfterRefuse = JSON.parse(readFileSync(join(paths.teamRunsDir, delAId, 'artifacts-manifest.json'), 'utf-8'));
+  manifestAfterRefuse.artifacts?.some((a) => a.id === 'a-del-1')
+    ? ok('refusal preserves manifest entry (no partial delete)')
+    : bad('manifest entry was clobbered despite refusal');
+  existsSync(delAFullPath)
+    ? ok('refusal preserves on-disk file (no partial delete)')
+    : bad('artifact file was unlinked despite refusal');
+  // 17d-4) Audit trail: state-history has a "user-delete" row for the refusal
+  // (we always log the attempt, success or not, for audit clarity)
+  const delHist = readFileSync(join(paths.teamRunsDir, delAId, 'state-history.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const delRow = delHist.find((h) => h.kind === 'artifact-delete-attempt' && h.artifact === `${delAId}/a-del-1` && h.outcome === 'refused');
+  delRow
+    ? ok('refusal recorded an artifact-delete-attempt state-history row (audit trail, outcome=refused)')
+    : bad('no audit row for refused delete');
+  // 17d-5) Now actually delete b-del-1 first, then a-del-1
+  await teamDel.execute({ runId: delBMeta.id, artifactId: 'b-del-1' });
+  (await artSvc.canDelete(`${delAId}/a-del-1`)) === true
+    ? ok('after deleting b-del-1, a-del-1 canDelete=true (ref gone)')
+    : bad('canDelete should be true after ref removal');
+  // Also delete the b-del-1 file (or skip — the test registered it but
+  // didn't create the actual file; the unlink call would ENOENT, which
+  // is benign per the tool's contract). Reset index so the next refCount
+  // re-scans from disk (the manifest has changed).
+  artSvc._resetIndexForTests();
+  const deleted = await teamDel.execute({ runId: delAId, artifactId: 'a-del-1', reason: 'cleanup' });
+  deleted.deleted === true
+    ? ok('team.delete_artifact succeeded after refs cleared (deleted=true)')
+    : bad(`deleted=${deleted.deleted}`);
+  // 17d-6) Manifest entry removed
+  const manifestAfterDelete = JSON.parse(readFileSync(join(paths.teamRunsDir, delAId, 'artifacts-manifest.json'), 'utf-8'));
+  !manifestAfterDelete.artifacts?.some((a) => a.id === 'a-del-1')
+    ? ok('successful delete removes the manifest entry')
+    : bad('manifest entry was not removed');
+  // 17d-7) File removed
+  !existsSync(delAFullPath)
+    ? ok('successful delete unlinks the on-disk file')
+    : bad('artifact file still on disk after delete');
+  // 17d-8) resolve() returns undefined now
+  (await artSvc.resolve(`${delAId}/a-del-1`)) === undefined
+    ? ok('resolve() returns undefined after delete (artifact gone)')
+    : bad('resolve should return undefined for deleted artifact');
+  // 17d-9) refCount from the now-deleted ref is 0 (no live refs to it)
+  artSvc._resetIndexForTests();
+  (await artSvc.refCount(`${delAId}/a-del-1`)) === 0
+    ? ok('refCount on a deleted artifact is 0 (index rebuild reflects the disk state)')
+    : bad('refCount should be 0 for deleted artifact');
+  // 17d-10) Delete a non-existent artifact: defensive, returns deleted=false
+  const ghost = await teamDel.execute({ runId: delAId, artifactId: 'ghost-id' });
+  ghost.deleted === false
+    ? ok('team.delete_artifact on a non-existent artifact: deleted=false (defensive)')
+    : bad(`ghost deleted=${ghost.deleted}`);
+  // 17d-11) Missing runId / artifactId throws
+  let missingIdErr = null;
+  try { await teamDel.execute({ artifactId: 'x' }); } catch (e) { missingIdErr = e; }
+  missingIdErr && /runId is required/.test(String(missingIdErr.message))
+    ? ok('team.delete_artifact throws on missing runId')
+    : bad(`missingIdErr=${missingIdErr?.message}`);
 
   // ---- 17c. ArtifactRegistry: O(1) is actually fast (scaling sanity) ----
   console.log('\n[17c/19] ArtifactRegistry (2.0 #2 scaling sanity)');

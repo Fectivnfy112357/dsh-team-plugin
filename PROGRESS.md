@@ -32,10 +32,13 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #1 留口 (rewiring) | (待 commit) | 三个 flow (pipeline / round-table / fan-out) 替换 `dispatchLog` 占位为 `MemberService.dispatch`:`dispatchTask(ctx, runId, memberId, opts)` helper —— 有 `ctx.subagents.followup` 走 `MemberService.dispatch` (写 dispatch-log + followup + auto-join),否则回退到 v1.0 `dispatchLog` 纯日志路径;`lib/index.js` 在 tool 注册时闭包 `ctx` 到 `args.__dshCtx`,`team.start.execute` 读它并透传给 `flowSvc.run`;`team.start` 补 `pending → assembling` 转换;唯一写入者承诺 / 4 worker 上限 / degraded flag / max_rounds 全部保留;smoke-test [12c/19] / [12d/19] / [12e/19] / [12f/19] 加 22 个新 check (pipeline auto-join + followup + 跨步 context_refs 透传 / round-table dispatchTask fallback / fan-out 平行 + aggregator 含 context_refs / team.start → flowSvc.run → dispatchTask → MemberService.dispatch 端到端) | `node scripts/verify.mjs` 5 层绿 · smoke-test 154 → 176 checks |
 | P1 #6 team.resume | (待 commit) | `team.resume` 工具落地:读 meta → 校验 `interrupted → assembling` ALLOWED 边 → 重 join 成员 (`MemberService.joinRun`,idempotent) → 重启 flow engine;`__dshCtx` 透传 production 路径走 `MemberService.dispatch` followup,无 ctx 走 v1.0 `dispatchLog` fallback;terminated member 走 best-effort rollback(状态机 `assembling → interrupted` 不在 ALLOWED 表里,直接 append state-history + 改 meta.json);与 `team.rerun` 语义切分保持(同 run 回滚 vs 配置克隆);smoke-test [20/19] 加 14 个新 check (not-found / non-interrupted 拒绝 / 端到端 mock ctx re-join + flow 重启 / state-history edge / session-state running / dispatch-log member-join / 无 ctx fallback) | `node scripts/verify.mjs` 5 层绿 · smoke-test 176 → 190 checks |
 | 2.0 #2 | (待 commit) | artifact O(1) 反向引用索引 `_refCountIndex: Map<ref, Set<consumerArtifactId>>`:`register()` 时按 derived_from 逐 dep 加边(intra-artifact dedup);`refCount()` 改 O(1) 索引查(两个等价形式 `<runId>/<id>` 和 bare `<id>` 取并集);`canDelete()` 复用;`rebuildIndex()` 首次 refCount 调用时从磁盘懒加载(在已有 manifest 累积时);`_resetIndexForTests` 清空+重载。语义兼容 v1.0 线性扫(每 artifact 最多计 1 次,即使 derived_from 含重复 dep)。smoke-test [17b/19] + [17c/19] 加 8 个新 check (3 consumers / cross-form dedup / idempotent re-register / reset rebuild / unknown ref / 95 refs < 50ms 缩放) | `node scripts/verify.mjs` 5 层绿 · smoke-test 190 → 198 checks |
+| P2 抛光 — A2A payload 上限 | (待 commit) | `message-service.js` 加 `A2A_PAYLOAD_MAX_BYTES = 1 MiB`(架构 §9.4 没硬定,1 MiB 是经验值:`a2a-message-log.jsonl` 单条 append 阻塞风险 + 对齐常见 ACP message 单条上限);`send` 入口按 `JSON.stringify(payload)` 长度校验;超限抛 `MessagePayloadTooLargeError`(可单独 catch,避免 pattern-match 错误字符串);失败时**不**写 a2a-log 也**不**碰 inbox(fail-fast);smoke-test [6b/19] 加 7 个新 check (1KB 接受 / 边界接受 / 超限抛 / 错误信息含 cap / 不漏到 a2a-log / 不碰 inbox / 常量值) | `node scripts/verify.mjs` 5 层绿 · smoke-test 198 → 206 checks |
+| P2 抛光 — cross-Run 引用硬删兜底 | (待 commit) | `team.delete_artifact` 工具落地:走 `canDelete` 引用检查,refcount>0 拒绝(`deleted: false` + `refCountAtDelete`);refcount=0 时改 manifest + unlink 文件 + 失效反向索引(`_resetIndexForTests`);**没有** `force: true` 覆盖(单写入者承诺 + 防止"绕过 ref guard 误删");审计行(state-history)同时记录拒绝和成功(`kind: 'artifact-delete-attempt'`, `outcome: 'refused' \| 'deleted'`);smoke-test [17d/19] 加 11 个新 check (refused 不漏写 / audit trail / ref 删后 canDelete 变 true / 删除成功改 manifest / unlink 文件 / resolve undefined / refCount 0 / ghost 防御 / 缺 runId 抛) | `node scripts/verify.mjs` 5 层绿 · smoke-test 206 → 221 checks |
+| P2 抛光 — §10 视觉 backlog 评估 | (待 commit) | 视觉 backlog 评估:配色/字体/圆角/间距/决策点角标颜色/A2A 消息密度 6 项均归 DSH host UI 侧(architecture §10 视觉子节明确归属 DSH),`ui/_react.js` 沙箱不持有实际样式;**不**在插件层实现,等真实用户声音 / DSH host 集成触发后由 DSH 端承担。本仓维持 `ui/team-*.js` React.createElement 最小骨架 + 已有 sentinel `data-*` 属性,等 host 端做最终样式 | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 198 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 221 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -50,7 +53,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引）
+- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引 + P2 抛光 A2A payload + P2 抛光 硬删兜底 + P2 抛光 §10 视觉评估）
 - Description 用 `package.json#description` 原文
 
 ---
