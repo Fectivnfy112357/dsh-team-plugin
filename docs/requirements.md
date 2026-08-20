@@ -1222,7 +1222,7 @@ decision_point_response = {
 
 - **状态 pill 上小角标**（不是高亮，不是新 pill）
 - 机制匹配：决策点不是新状态机状态，是 running 派系上的标记（小角标正好表达"上层信号，不破坏层级"）
-- 具体颜色 / 动效进视觉细节 backlog
+- 具体颜色 / 动效进本仓 `ui/` 2.0 视觉细节 backlog
 - 标准写死："可扫一眼识别"——多 Team 多个角标时必须明显但不打断
 
 #### 9.12.3 多 Team 介入交互（Q25 / D7-3）
@@ -1289,7 +1289,7 @@ decision_point_response = {
 
 ## 10. 常驻面板布局规范
 
-DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mockup [`mockups/panel-linear.html`](../mockups/panel-linear.html) 验证。本节只规定结构组件，**视觉细节（配色 / 字体 / 圆角 / 间距）留到后面单独定**。
+DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mockup [`mockups/panel-linear.html`](../mockups/panel-linear.html) 验证。本节只规定结构组件，**视觉细节（配色 / 字体 / 圆角 / 间距）由本仓 `ui/` 2.0 实现轮展开**——不再推到外部 DSH 端。
 
 ### 10.1 区域结构
 
@@ -1340,13 +1340,14 @@ DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mo
 ### 11.2 仍待讨论项
 
 - **其他 Flow 模式**（除圆桌/流水线/扇出外）——用户提"可能还有其他场景后续再说"
-- **暂停-恢复的 UI 暗示**（机制不拍，UI 归属 DSH/UI 侧）——运行中 DSH 不在线时如何在 UI 上暗示"无推进"
+- **暂停-恢复的 UI 暗示**（机制不拍，UI 由本仓做）——运行中 DSH 不在线时如何在常驻面板上暗示"无推进"
 
-### 11.3 视觉细节 backlog（已留待）
+### 11.3 视觉细节 backlog（已留待）——全部归本仓 `ui/`
 
-- 配色 / 字体 / 圆角 / 间距——骨架已通过 mockup 验证
+- 配色 / 字体 / 圆角 / 间距——骨架已通过 mockup 验证；本仓 2.0 实现轮展开
 - 决策点角标的具体颜色 / 动效
 - A2A 消息在不同 flow 下的密度渲染策略细节
+- 常驻面板 chrome（顶栏 / sidebar / footer / 主区头 / 重跑按钮 / ad-hoc 决策点按钮 / 决策点响应卡片 / 多 Team 视图）——全部归本仓 `ui/` + `lib/index.js` slot 注册；不再推外部 DSH 端
 
 ### 11.4 Open Questions（2026-08-20 全部 closed）
 

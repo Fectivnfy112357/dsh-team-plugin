@@ -37,7 +37,7 @@ DSH Team 插件的仓库——同时承载需求/设计文档（已落地）和�
 | `skills/start-team/SKILL.md` | ✅ | `/start-team` skill 入口（双格式内容唯一源）|
 | `scripts/verify.mjs` | ✅ | 5 层自检：critical paths / identity+frontmatter / node --check / lib load + tool schema / smoke 221 check |
 | `scripts/check-output-schema.mjs` | ✅ | 静态扫所有 `defineTool` 的 output schema：嵌套结构 + required 键必须出现在 properties |
-| `scripts/test-install.mjs` | ✅ | 实启 `dsh --profile web --port 0`，13 项 host 侧门（prerequisites / manifest / boot / teardown）|
+| `scripts/test-install.mjs` | ✅ | 实启 `dsh --profile web --port 0`，13 项 host 启动门（prerequisites / manifest / boot / teardown）|
 | `scripts/smoke-test.mjs` | ✅ | service 层端到端 221 check（被 verify.mjs 第 5 层调用）|
 
 ## 实现从哪开始
@@ -84,7 +84,7 @@ dsh --profile web --port 0
 #   期望 stdout: `dsh web: http://127.0.0.1:<port>`，stderr 空
 ```
 
-### 2. Host 侧踩过的真错（dsh-team-plugin 已踩过，必读）
+### 2. Host 启动时校验真错（dsh-team-plugin 已踩过，必读）
 
 按"出现概率 × 排查难度"排序的 5 个 host-side footgun。**任何修改 `lib/index.js` 或 `lib/tools/*.js` 后再装都可能踩**：
 

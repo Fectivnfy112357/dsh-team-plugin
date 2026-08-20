@@ -3,6 +3,8 @@
 > 记录时间：2026-08-20 · HEAD = 待 commit · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
+>
+> **范围重述（2026-08-20）**：本仓即 DSH Team 体验的 host——`client-ui-*` 槽位的实现组件、常驻面板 chrome（顶栏/sidebar/footer/主区头/团队操作按钮）、决策点响应卡片、ad-hoc 决策点按钮、多 Team 视图、重跑按钮、视觉细节 token、配置中心、Role/Member/TeamTemplate CRUD UI 全部归本仓；不再推到外部 DSH 端。
 
 ---
 
@@ -19,8 +21,8 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | P2 Story 2 | `c1c5e0f` | PipelineFlow + feedback loop + DSH-routing handoff | smoke-test 覆盖 |
 | P3 Story 3 | `c32c6e6` | FanOutFlow + 预飞行 DP + aggregator + 4-worker 物理 cap | smoke-test 覆盖 |
 | P4–P8 | `c1374e5` | PlanService + ArtifactRegistry（跨 Run + 不可变 + 删除保护）+ team.rerun + cost-cap DP + 3 Adapter providers | smoke-test 覆盖 |
-| fix(install) | `8f7c3fe` | 2 处 DSH host 侧真错（`inject: slots` / `output.render`） | `dsh --profile web --port 0` 起来 |
-| docs(agents) | `0ff8f9b` | 装到本地 DSH 步骤 + 2 处 host 侧真错记录进 AGENTS.md | 本仓文档 |
+| fix(install) | `8f7c3fe` | 2 处 host 启动时校验真错（`inject: slots` / `output.render`） | `dsh --profile web --port 0` 起来 |
+| docs(agents) | `0ff8f9b` | 装到本地 DSH 步骤 + 2 处 host 启动时校验真错记录进 AGENTS.md | 本仓文档 |
 | docs(structure) | `9cd7965` | 把 `requirements.md` / `architecture.md` / `discussion-log.md` 移到 `docs/` 子目录 + 修正跨文件相对链接 | `node scripts/verify.mjs` 5 层绿 |
 | docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
 | P1.5-a / P1.5-b | `d478fdd` | `ui/team-plan.js` 新建 + slot 注册 + DP 实时订阅桥 (`wireDecisionPointBridge` → `team/decision-point-open` / `-respond` 事件总线) + `subscribeDps(ctx, onChange)` helper | `node scripts/verify.mjs` 5 层绿 · smoke-test 84 → 97 checks |
@@ -34,13 +36,14 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #2 | (待 commit) | artifact O(1) 反向引用索引 `_refCountIndex: Map<ref, Set<consumerArtifactId>>`:`register()` 时按 derived_from 逐 dep 加边(intra-artifact dedup);`refCount()` 改 O(1) 索引查(两个等价形式 `<runId>/<id>` 和 bare `<id>` 取并集);`canDelete()` 复用;`rebuildIndex()` 首次 refCount 调用时从磁盘懒加载(在已有 manifest 累积时);`_resetIndexForTests` 清空+重载。语义兼容 v1.0 线性扫(每 artifact 最多计 1 次,即使 derived_from 含重复 dep)。smoke-test [17b/19] + [17c/19] 加 8 个新 check (3 consumers / cross-form dedup / idempotent re-register / reset rebuild / unknown ref / 95 refs < 50ms 缩放) | `node scripts/verify.mjs` 5 层绿 · smoke-test 190 → 198 checks |
 | P2 抛光 — A2A payload 上限 | (待 commit) | `message-service.js` 加 `A2A_PAYLOAD_MAX_BYTES = 1 MiB`(架构 §9.4 没硬定,1 MiB 是经验值:`a2a-message-log.jsonl` 单条 append 阻塞风险 + 对齐常见 ACP message 单条上限);`send` 入口按 `JSON.stringify(payload)` 长度校验;超限抛 `MessagePayloadTooLargeError`(可单独 catch,避免 pattern-match 错误字符串);失败时**不**写 a2a-log 也**不**碰 inbox(fail-fast);smoke-test [6b/19] 加 7 个新 check (1KB 接受 / 边界接受 / 超限抛 / 错误信息含 cap / 不漏到 a2a-log / 不碰 inbox / 常量值) | `node scripts/verify.mjs` 5 层绿 · smoke-test 198 → 206 checks |
 | P2 抛光 — cross-Run 引用硬删兜底 | (待 commit) | `team.delete_artifact` 工具落地:走 `canDelete` 引用检查,refcount>0 拒绝(`deleted: false` + `refCountAtDelete`);refcount=0 时改 manifest + unlink 文件 + 失效反向索引(`_resetIndexForTests`);**没有** `force: true` 覆盖(单写入者承诺 + 防止"绕过 ref guard 误删");审计行(state-history)同时记录拒绝和成功(`kind: 'artifact-delete-attempt'`, `outcome: 'refused' \| 'deleted'`);smoke-test [17d/19] 加 11 个新 check (refused 不漏写 / audit trail / ref 删后 canDelete 变 true / 删除成功改 manifest / unlink 文件 / resolve undefined / refCount 0 / ghost 防御 / 缺 runId 抛) | `node scripts/verify.mjs` 5 层绿 · smoke-test 206 → 221 checks |
-| P2 抛光 — §10 视觉 backlog 评估 | (待 commit) | 视觉 backlog 评估:配色/字体/圆角/间距/决策点角标颜色/A2A 消息密度 6 项均归 DSH host UI 侧(architecture §10 视觉子节明确归属 DSH),`ui/_react.js` 沙箱不持有实际样式;**不**在插件层实现,等真实用户声音 / DSH host 集成触发后由 DSH 端承担。本仓维持 `ui/team-*.js` React.createElement 最小骨架 + 已有 sentinel `data-*` 属性,等 host 端做最终样式 | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks |
+| P2 抛光 — §10 视觉 backlog 评估 | (待 commit) | **撤销"归 DSH host 端"判定**。本仓即 DSH Team 体验的 host,所有视觉细节(配色/字体/圆角/间距/决策点角标颜色/A2A 消息密度/常驻面板 chrome 全部)归本仓。`ui/_react.js` 沙箱将升级为持有实际样式 token(色板/字号/圆角/间距变量)与具体子组件;`ui/team-*.js` React.createElement 骨架扩展为带 sentinel `data-*` 属性的完整可读组件(本轮只声明留口,具体排版与微交互归 2.0 实现轮) | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks |
 | 5 OQ 全部 close (措辞签字) | (待 commit) | 2026-08-20 用户一次性签字 OQ-2/3/4/5 (按推荐项);`docs/requirements.md §11.4` / `docs/architecture.md §11.2` / `docs/requirements.md §17.5` 措辞收口,OQ-1 在 `aedbd10` 实质闭环;5 OQ 全部 closed,实现层与文档措辞一致 | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks (文档-only) |
 
 ### 1.1 验证
 
 - `node scripts/verify.mjs` — 5 层 + 221 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
-- 预期输出：`✅ verify passed (0 warnings, 0 errors)`
+- `node scripts/test-install.mjs` — 实启 `dsh --profile web --port 0` 13 项 host 启动门（prerequisites / manifest / boot / teardown）— **依赖 DSH**
+- 预期输出：`✅ verify passed (0 warnings, 0 errors)` + `13 passed, 0 failed`
 
 ### 1.2 装机状态
 
@@ -59,114 +62,78 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 ---
 
-## 2. 未完成的明确任务
+## 2. 2.0 路线 — 未完成的明确任务（17 项，按依赖递增）
 
-按依赖顺序排列，**先做哪个优先**。
+`2026-08-20` 重排。按"先小后大、先核心 chrome 后增量"顺序，每项带工作量估时。**所有项归本仓 `ui/` + `services/` + `lib/`；不依赖外部 DSH 端集成。**
 
-### 2.0 路线 — 5 项 closed（按依赖递增）
+### A 类 — 配置中心 + Role/Member/TeamTemplate CRUD（5 项，估时 1-2 天）
 
-#### #1 MemberService 真子代理驱动 — ✅ 完成 (commit `530af83` + `40fe5fe` + `756b7b1`)
+> 文档承诺的 `team-config` slot 是"Role / Member / Team-Template 配置中心",目前只到"读"。`RoleService` / `TeamTemplateService` / `MemberService` 三个 service 的持久化层都缺 `create / update / delete`;`team-config` slot 和 `settings.section` slot 错把 `TeamPanel`(run-state 组件)当成 form 用了。
 
-**已完成** (第一轮 `530af83`):
-- ✅ 拍板 design 开放项:**parent = exec.agent (option A)**
-- ✅ 拍板 adapter 注册路径:**三个 `@deepseek-ai/dsh-subagent-acp` Cordis 实例通过 `cordis.patch.yml` 声明**,`registerAdapters(ctx)` 改为 verify-and-warn
-- ✅ `joinRun(ctx, runId, memberId, opts)` — 调 `ctx.subagents.startContinuable({ provider, label, request: { parent, prompt, persona? }, signal })` + 写 `session-state.json` (state=running, child_id, provider, label, joined_at, session_chain) + 写 `dispatch-log` (kind=member-join)
-- ✅ `leaveRun(ctx, runId, memberId, opts)` — best-effort `ctx.subagents.interrupt(targetSessionId, authority)` + 写 `session-state.json` (state=terminated, left_at, leave_reason) + 写 `dispatch-log` (kind=member-leave)
-- ✅ Idempotency: joinRun 二次调用返 existing,leaveRun 二次调用 no-op
+| # | 项 | 工作内容 | 估时 |
+|---|---|---|---|
+| A1 | `RoleService` CRUD | 加 `create / update / delete` 方法(写到 `~/.dsh/team-assets/roles/<id>.json`);id 格式校验 (`/^[a-z0-9][a-z0-9._-]*$/`);schema 校验 (id/display_name/persona/adapter/cli_options/tools_allowed/avatar);ref-count 引用检查 (被 member / template 引用则拒绝删);smoke-test 扩 N check | 0.25d |
+| A2 | `TeamTemplateService` CRUD | 同上模式,落 `~/.dsh/team-assets/team-templates/<id>.json`;schema 校验 (id/name/flow/flow_config/members 数组);ref-count 引用检查 (被 run 引用则拒绝删,可软删 + tombstone) | 0.25d |
+| A3 | `MemberService` 持久化 CRUD | 加 `create / update / delete`(运行时 joinRun/leaveRun/sendMessage 等 8 个方法不动);落 `~/.dsh/team-assets/members/<id>.json`;schema 校验 (id/role_id/display_name/persona/cli_options_override);ref-count 引用检查 (被 team-template 引用则拒绝删) | 0.25d |
+| A4 | 配置中心表单组件 | 新建 `ui/team-config.js`(替代错用的 TeamPanel),3 tab:Role / Member / TeamTemplate;每 tab 一个 list + 新增/编辑/删除按钮 + 表单字段(参考 architecture §5.2 schema);实时预览(§12.1 A4);smoke-test 走 service 路径不验 UI | 0.5d |
+| A5 | `team-config` slot + `settings.section` slot 重接 | `ui/team-panel.js` 把 `team-config` / `settings.section` 的 `component` 改成 `TeamConfigPanel`(来自 A4);保留 `team-panel` 跑原 `TeamPanel`(run-state);label / props 调整 | 0.1d |
 
-**已完成** (第二轮 `40fe5fe` — 4 留口方法落地):
-- ✅ `sendMessage(ctx, runId, fromMemberId, msg, opts)` — 走 `MessageService.send` 落 a2a-message-log + 投 inbox,收件人是单个已 join member 时 `ctx.subagents.followup` 推轻量 prompt("你有一条新消息");broadcast 不触发 followup(每个 member 自己读 inbox)
-- ✅ `dispatch(ctx, runId, toMemberId, opts)` — 未 join 自动 joinRun + 已 join 复用,`ctx.subagents.followup` 推 task prompt,dispatch-log 落 `from: scheduler, to: member, context_refs` 单写入者承诺
-- ✅ `wake(ctx, runId, toMemberId, opts)` — force-wake 无 dedup(对比 `MessageService.send` 内的 shouldWake dedup 路径);live child 不存在返 `dispatched: false`
-- ✅ `triggerSelfHandoff(ctx, runId, memberId, opts)` — interrupt 旧 child + startContinuable 新 child + session-state.json 更新(current_session_id 替换、session_chain/handoff_files append、self_handoff_count +1、state 保持 running);dispatch-log 落 `kind: member-self-handoff`
-- ✅ smoke-test [9j] 22 个新 check(124 → 146): 各方法的 entry shape / dispatch-log row / session-state 字段 / no-op 路径 / idempotency / 边界
+### A 类配套 — 工具层(给 agent 编程用,3 项,估时 0.5d)
 
-**已完成** (第三轮 `756b7b1` — flow engine rewiring):
-- ✅ **flow engine rewiring** —— `dispatchTask` helper 在三个 flow (pipeline / round-table / fan-out) 替换 `dispatchLog` 占位为 `MemberService.dispatch` (production) / `dispatchLog` (legacy test) 双路径;`lib/index.js` 闭包 `ctx` 到 `args.__dshCtx` 让 `team.start` 真驱动子代理;`pending → assembling` 转换补全;smoke-test 154 → 176 (22 个新 check)
-- ✅ 唯一写入者承诺 / 4 worker 上限 / degraded flag / max_rounds 全部保留;`signalStepTerminal` / `signalBranchTerminal` 仍是 test + production 共同的"step / branch 完成"信号(子代理在 DSH 内部走 `team.complete_step` 工具)
+| # | 项 | 工作内容 | 估时 |
+|---|---|---|---|
+| A6 | `team.create_role` / `team.update_role` / `team.delete_role` 工具 | 接 RoleService CRUD,加到 `lib/tools/team-tools.js`;output schema 走 `check-output-schema.mjs`;smoke-test 扩 N check;`/start-team` SKILL Step 3 引导可走工具链 | 0.15d |
+| A7 | `team.create_member` / `team.update_member` / `team.delete_member` 工具 | 同上,接 MemberService CRUD | 0.15d |
+| A8 | `team.create_template` / `team.update_template` / `team.delete_template` 工具 | 同上,接 TeamTemplateService CRUD | 0.15d |
 
-**依赖**: 无前置 (独立模块,本轮已全闭环)
+### B 类 — UI chrome 与决策点响应（9 项，估时 2-3 天）
 
-#### #2 跨 Run artifact 反向引用索引 — ✅ 完成 (commit `63864c9`)
+> 文档承诺的所有 `client-ui-*` 槽位组件、面板 chrome、决策点响应卡片、ad-hoc 按钮、多 Team 视图、视觉细节 token —— 全部归本仓。
 
-**Why deferred**: v1.0 `artifact-registry.js#refCount` 是 lazy 线性扫描。Run 多了会变慢（O(n) 每次 refCount 查询）。
+| # | 项 | 工作内容 | 估时 |
+|---|---|---|---|
+| B1 | 视觉 token 系统 | 扩展 `ui/_react.js`:持有 CSS 变量对象(色板/字号/圆角/间距/动效时长);导出 `tokens` 常量供所有 `ui/*.js` 引用;mockups/panel-linear.html 风格定为 default theme;`check-output-schema.mjs` 加 token 必填校验 | 0.25d |
+| B2 | 顶栏 brand + Team 运行状态 pill | 新建 `ui/layout.js`:注册到 `client-ui-layout` 槽位;brand logo + 当前活跃 Team 的运行状态 pill(state 颜色由 B1 token 决定);空状态显示 "DSH Team" 占位 | 0.3d |
+| B3 | 左 sidebar 活跃 + 历史 Team + 素材库入口 | 新建 `ui/sidebar.js`:注册到 `client-ui-sidebar` 槽位;活跃 Team 列表(从 `TeamService.runStore.list({ state: 'non-terminal' })`);历史 Team 折叠区 "历史 (N)";素材库入口跳转配置中心(A4 的 team-config slot) | 0.4d |
+| B4 | 主区头 Team 名 + flow 类型 + 团队操作按钮 | 扩展 `ui/team-panel.js` 或新建 `ui/main-header.js`:Team 名(从 `runMeta`)+ flow 类型 pill + 重跑/中止按钮(走 `team.rerun` / `team.abort` 工具);决策点小角标(接 B7) | 0.25d |
+| B5 | 全局 footer ACP / artifact / dispatch / message 计数 + 命令面板 | 新建 `ui/footer.js`:注册到 `client-ui-layout` 槽位的 footer 段;4 个计数(从 `~/.dsh/team-assets/` 目录或 `TeamService` stat 读);命令面板 `⌘K` 快捷键入口(可选) | 0.4d |
+| B6 | 决策点响应卡片(输入框 + action 三选 + 消息一体) | 扩展 `ui/team-decision-badge.js` + 新建 `ui/user-questions.js`:注册到 `client-ui-user-questions` 槽位;决策点事件卡片包含 prompt 文本 + action 三选(continue / complete / abort)+ 可选 feedback 输入框;submit 走 `team.respond_decision_point` 工具;实时 DP 订阅接 P1.5-b 桥 | 0.5d |
+| B7 | 决策点角标 + "无推进"暗示 | 扩展 `ui/team-decision-badge.js`:状态 pill 上的小角标(不新 pill);DSH handoff 期间 session 保活但无推进的角标状态(`session-state.json.state == 'running' && last_dispatch_at > 5min`);颜色用 B1 token | 0.15d |
+| B8 | 主区 timeline + A2A 消息密度 + in_reply_to 关系 | 新建 `ui/conversation.js`:注册到 `client-ui-conversation` 槽位;消息气泡 + handoff 卡片 + A2A 消息气泡;按 flow 自适应密度(round-table 中 A2A 为主, pipeline / fan-out 中 A2A 穿插);in_reply_to 一级虚线引导 | 0.5d |
+| B9 | ad-hoc 决策点按钮 + 多 Team 视图 + 重跑按钮 | `ui/main-header.js` 加 "插入决策点" 按钮(只在 `running` + `flow_config.ad_hoc_decision_points=true` 时显示);侧栏多 Team 上下同框(B3 已含);重跑按钮走 `team.rerun`,复用 members + flow_config + 预填 task_description | 0.3d |
 
-**已完成** (本轮):
-- ✅ 维护 `_refCountIndex: Map<ref, Set<consumerArtifactId>>`,in-memory
-- ✅ `register()` 走 `indexAdd` 加边,intra-artifact dedup 维持 v1.0 线性扫语义
-- ✅ `refCount()` 改 O(1) 索引查;两个等价形式 (`<runId>/<id>` + bare `<id>`) 集合并集
-- ✅ `rebuildIndex()` 首次 `refCount` 调用时从磁盘懒加载;`_resetIndexForTests()` 暴露给测试 + cold-start 路径
-- ✅ smoke-test [17b/19] + [17c/19] 加 8 个新 check (3 consumers / cross-form dedup / idempotent re-register / reset rebuild / unknown ref / 95 refs < 50ms 缩放)
+### B 类配套 — toolview 槽位扩展(2 项,估时 0.2d)
 
-**依赖**: 无（独立优化）
+| # | 项 | 工作内容 | 估时 |
+|---|---|---|---|
+| B10 | 工具调用呈现 (dispatch / handoff 卡片) | 新建 `ui/tool.js`:注册到 `client-ui-tool` 槽位;工具调用卡片,dispatch / handoff 用 `ui/team-handoff-card.js` + `ui/team-handoff-redo.js` 已落,补全通用工具调用框架 | 0.1d |
+| B11 | plan 通用呈现(与 `team-plan` 协同) | 新建 `ui/plan.js`:注册到 `client-ui-plan` 槽位;与 `team-plan` slot 协同(已有 P1.5-a);DSH 通用 plan UI fallback | 0.1d |
 
-#### #3 Cordis Service 跨插件注册 — ✅ 完成 (commit `d381f73`)
+### 依赖关系
 
-**已完成** (本轮):
-- ✅ 拍板 API:`ctx.provide(name, value)`(Cordis `reflect.ts#provide`,`ctx.provide` 经 `mixin('reflect', ['provide', ...])` 混到 ctx 上)
-- ✅ `createTeamServiceBundle()` —— 六个 service 模块聚合为一个 frozen 对象 `{ team, members, decisions, messages, plans, artifacts }`,并行 `Promise.all` 加载(模块缓存后零成本)
-- ✅ `registerTeamServices(ctx)` —— `ctx.effect(() => ctx.provide('team', bundle))`,effect 卸载时自动调 dispose
-- ✅ `apply()` step 3d 在 DP bridge 之后调用,无 `ctx.provide` 时短路(无运行时 smoke-test 场景)
-- ✅ smoke-test 110 → 120 checks: bundle shape / 6 keys / frozen / 每 key 函数齐全 / no-op ctx / `ctx.provide` 形参与名 / effect 包装 / dispose 链
+- A1-A3 是 A4-A8 的前置(没 service CRUD,form 跟 tool 没法用)
+- A4 是 A5 的前置(没 form 组件,slot 接不上)
+- B1 是 B2-B9 的前置(token 不定,所有 chrome 没法配色)
+- A 类与 B 类**互相独立**,可并行排
+- 总估时 1.5 + 0.5 + 2.5 + 0.2 = **约 4-5 天**
 
-**留口**: 无
+### 验证门
 
-**依赖**: 无前置 (独立模块)
+每项完工动作:
+- 代码 → smoke test → `node scripts/verify.mjs` → `node scripts/test-install.mjs` → commit → push → 回到本文件 §1 加 commit 记录 + §2 移走
 
-#### #4 pipeline-with-feedback step handoff → next step context_refs 传播 — ✅ 完成 (commit `fe38a78`)
-
-**Why deferred**: v1.0 `services/pipeline-flow.js#runPipeline` 在 `signalStepTerminal` 收 `produced_artifact_ids` 后**没**自动带入下一步 dispatch 的 `context_refs`;`§4.7.2` 流程图也只写「查 plan 后派单」未明文规定 context 传递语义。fan-out §4.7.3 已经显式写了 `aggregator context_refs = completed_members.artifacts`,pipeline 写法不一致,产物跨步传递不显式。
-
-**已完成** (本轮):
-- ✅ `services/pipeline-flow.js#runPipeline` 维护 in-memory `stepOutputs[stepIndex] = { produced_artifact_ids }`(`Map<runId, Array<{...}>>`);feedback retry 路径取最终 attempt 的产物(覆盖式写)
-- ✅ 派下一步时按优先级解析 `context_refs`:(1) `step.context_refs` 静态覆盖 → (2) `flow_config.context_refs_override[stepIndex]` flow 覆盖 → (3) 派生自 `stepOutputs[i-1].produced_artifact_ids`(空数组 / 缺失时降级为 `[]`)
-- ✅ smoke-test [12b/19] 加 8 个新 check:auto-derive (3-step + multi-artifact)/ step-level override / flow-level override / feedback retry 取最终产物 / 空产物边界 / 跨 run 隔离 / `_resetForTests` 清空
-- ✅ 导出 `_resetStepOutputsForTests(runId)`(备 2.x cold-resume 场景)
-
-**依赖**: 不依赖 #1 留口(`signalStepTerminal` 协议不动,只补内部 state 派生);与 #1 留口并行开发 OK
-
-#### #5 reconcileOnBoot per-dispatch mark 补全 — ✅ 完成 (commit `aedbd10`)
-
-**已完成** (本轮):
-- ✅ `reconcileOnBoot` 扫每 run 的 `dispatch-log.jsonl`,对每个 `terminal` 为空的 dispatch 调 `DispatchService.markTerminal(runId, dispatchId, 'interrupted', { reason: 'process-killed' })` —— append 一行,原 issue 行不动
-- ✅ smoke-test [4/19] 扩 4 个 check: in-flight 标 `interrupted` + reason; 已完成的不被覆盖; 原 issue 行保留
-- ✅ 文档: `requirements.md §9.6` 早就要求,`architecture.md §6.2` 同样写;1.0 收口时漏了,审阅发现
-
-**留口**: 无
-
-**依赖**: 无
-
-#### #6 重跑 interrupted 语义切分 — ✅ 拍板 (commit `aedbd10`, 文档)
-
-**已完成** (本轮):
-- ✅ 拍板: 重跑 interrupted = 两个动作分清:
-  - **同 run 状态回滚** = `team.resume`(v1.0 留口,P1 实现) — 用现有 ALLOWED 转换 `interrupted → assembling`,同 run-id,保留历史
-  - **配置克隆** = `team.rerun`(v1.0 已实现,`lib/tools/team-tools.js:547`) — 新 run-id,`teamService.start()` 拿新 id
-- ✅ `architecture.md §6.3` 加表格区分,2.0 实施时给 UI 的 interrupted 卡片放两个按钮
-
-**留口**:
-- ✅ `team.resume` 工具实现(本轮 commit) — 读 `meta.json` 当前状态 → ALLOWED 转换 `interrupted → assembling` → 重 join 成员 → 重启 flow engine
-
-### P1.5 路线 — ✅ 已闭环（commit `d478fdd`）
-
-#### P1.5-a `team-plan` slot UI ✅
-
-- `ui/team-plan.js` 新建: 接收 `plan` 对象或 `planId` 三态(loading/error/content)
-- slot id: `team-plan`（keyed）已注册到 `lib/index.js`
-- `loadPlan(planId)` helper 导出,host 在 useEffect 里 resolve 后通过 `props.plan` 传入
-
-#### P1.5-b `team-panel` 实时 DP 订阅 ✅
-
-- `lib/index.js` 新增 `wireDecisionPointBridge(ctx)` (export),effect-wrapped 在 `apply()` 阶段挂上
-- `DecisionPointService.on('open'|'respond')` → `ctx.emit('team/decision-point-open' | '-respond', dp)`
-- `ui/team-panel.js` 新增 `subscribeDps(ctx, onChange)`: host React 端 useEffect 调用,onChange 收到 `{ runId, kind, action, dp }` 触发重渲染
-- `plugin unload` 时 dispose 自动调用(由 effect 的 disposer 链保证)
+新增 smoke-test 覆盖:
+- A1-A3: 增删改查 schema 校验 / 引用检查 / idempotent / 文件落盘
+- A4-A5: snapshot test(form render 关键路径)
+- A6-A8: 工具 entry shape / 错误透传 / smoke-test 不依赖 UI
+- B1: token 必填校验
+- B2-B11: 静态组件 render 测试(React.createElement 输出) + 端到端 boot 仍干净
 
 ---
 
 ## 3. 待用户拍板（不是实现任务，是机制/措辞决策）
 
-`requirements.md §11.4` / `architecture.md §11.2` 共 5 条 OQ + 1 条 2.0 拍板记录 + 1 条本轮新增的机制决策。v1.0 实现里已经用**倾向值**（tentative defaults）写死了，但措辞上仍 open。
+`requirements.md §11.4` / `architecture.md §11.2` 共 5 条 OQ + 2 条 2.0 拍板记录。**全部 closed**(2026-08-20 用户签字)。
 
 | OQ | 倾向值（已写进实现）| 拍板状态 |
 |---|---|---|
@@ -184,34 +151,57 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 ## 4. 留口（不属于"未完成"，是"未来议题"）
 
-`requirements.md §11.2 / §11.3` + `architecture.md §11.3`:
+> 真正的"未来议题"——`requirements.md §11.2 / §11.3` + `architecture.md §11.3` 中**确实需要拍板或等触发条件**的项,不属于 §2 那种"已经知道怎么干、只是没排活"的工程任务。
 
-- **其他 Flow 模式**（除圆桌 / 流水线 / 扇出外）—— 用户提"可能还有其他场景后续再说"
-- **暂停-恢复的 UI 暗示**（机制不拍，UI 归属 DSH/UI 侧）—— 运行中 DSH 不在线时如何在 UI 上暗示"无推进"
-- **视觉细节 backlog**: 配色 / 字体 / 圆角 / 间距 / 决策点角标颜色 / A2A 消息密度渲染
-- **`read_only` 角色 + `orchestra_report` 通道**（`§14.5 D8-1`）—— 维持不做，等真实用户声音 / 合规审计需求
+- **其他 Flow 模式**（除圆桌 / 流水线 / 扇出外）—— 用户提"可能还有其他场景后续再说";等真实用例出现
+- **`read_only` 角色 + `orchestra_report` 通道**（`§14.5 D8-1`）—— 维持不做,等真实用户声音 / 合规审计需求
+
+> §2 路线已涵盖"暂停-恢复 UI 暗示"和"视觉细节 backlog",从本节移除。
 
 ---
 
 ## 5. 推进顺序（建议）
 
+### 第一批:配置中心(2.0 路线 A 类)
 ```
-P1.5-a team-plan slot UI       ✅ commit d478fdd
-P1.5-b 实时 DP 订阅             ✅ commit d478fdd
-2.0 #1 MemberService 真子代理    ✅ commit 530af83 (joinRun/leaveRun) + ✅ commit 40fe5fe (sendMessage/dispatch/wake/triggerSelfHandoff) + ✅ (本轮 commit) flow engine rewiring (dispatchTask in 3 flows + lib/index.js ctx 闭包 + team.start 端到端)
-2.0 #3 Cordis Service 注册       ✅ commit d381f73 (frozen bundle on ctx.team via ctx.provide)
-2.0 #5 reconcileOnBoot per-dispatch mark ✅ commit aedbd10 (审阅收口 #1)
-2.0 #6 重跑 interrupted 语义      ✅ 拍板 (commit aedbd10)  team.resume 留口
-2.0 #4 pipeline context_refs    ✅ (本轮 commit)
-2.0 #2 跨 Run artifact 索引     ✅ (本轮 commit)
+A1 RoleService CRUD                       0.25d
+A2 TeamTemplateService CRUD               0.25d
+A3 MemberService 持久化 CRUD              0.25d
+A4 配置中心表单组件 (Role/Member/Template 3 tab)  0.5d
+A5 team-config + settings.section slot 重接  0.1d
+A6-A8 3 套 CRUD 工具 (role/member/template) 0.5d
+─────────────────────────────────────────────────
+小计                                      ~1.85d
 ```
+解锁:用户在 DSH 设置页 "Team" 项里能增删改 Role / Member / TeamTemplate,SKILL.md 引导可走通。
 
-每一项完工动作: 代码 → smoke test → `node scripts/verify.mjs` → commit → push → 回到本文件更新 §1/§2。
+### 第二批:UI chrome (B 类)
+```
+B1 视觉 token 系统                         0.25d
+B2 顶栏 brand + Team 运行状态 pill        0.3d
+B3 左 sidebar 活跃 + 历史 Team + 素材库入口  0.4d
+B4 主区头 Team 名 + flow 类型 + 团队操作按钮 0.25d
+B5 全局 footer ACP/artifact/dispatch/message 计数  0.4d
+B6 决策点响应卡片 (输入框 + action 三选 + 消息一体)  0.5d
+B7 决策点角标 + "无推进"暗示              0.15d
+B8 主区 timeline + A2A 密度 + in_reply_to  0.5d
+B9 ad-hoc 决策点按钮 + 多 Team 视图 + 重跑按钮  0.3d
+B10-B11 tool / plan 通用呈现              0.2d
+─────────────────────────────────────────────────
+小计                                      ~3.25d
+```
+解锁:常驻面板 chrome 完整,决策点响应可点击,ad-hoc 介入按钮可见,多 Team 切换可达。
+
+### 总计
+两批合计约 **5 天**;A 类与 B 类**互相独立**,可以并行排给两个 worker。
+
+每一项完工动作: 代码 → smoke test → `node scripts/verify.mjs` → `node scripts/test-install.mjs` → commit → push → 回到本文件 §1 加 commit 记录 + §2 移走。
 
 ---
 
 ## 6. 协议
 
-- 进度变更**只动本文件**: §1 增加 commit 记录、§2 把已完成项移到 §1 + 从 §2 移除、§3/§4 用户拍板后从 open 移到 closed
+- 进度变更**只动本文件**: §1 增加 commit 记录、§2 把已完成项移到 §1 + 从 §2 移除、§3 用户拍板后从 open 移到 closed、§4 留口触发后从 open 移到 §1 或 §2
 - 不要在 PROGRESS.md 里堆细节（细节去 commit message + smoke test）
 - 每次 commit 完顺手更新本文件 + 同一 commit 里 push（避免漂移）
+- §2 新增项 = 已经知道怎么干、只是没排活的工程任务;§4 留口 = 需要拍板或等触发条件;**不要把留口塞进 §2**

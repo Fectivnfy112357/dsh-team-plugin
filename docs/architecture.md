@@ -21,7 +21,7 @@
 
 - 重新讨论产品形态 / 机制层（`requirements.md` 第八轮之前任何点都视作定稿）
 - 业务实现代码体（`lib/` `services/` `ui/` `skills/` 的函数体 / 组件实现 / 业务逻辑）——接口级骨架落到本文件，函数体留给仓内代码文件
-- 视觉细节（配色 / 字体 / 间距 / 圆角 / 动效）— §11.3 + `requirements.md §10.3` 留给后续
+- 视觉细节（配色 / 字体 / 间距 / 圆角 / 动效）— §11.3 + `requirements.md §10.3` 归本仓 `ui/` 2.0 实现轮展开
 - 跨 Run artifact 引用 id 内 run 归属段的具体编码格式（`requirements.md §11.4` Open Question，DSH 实现层定）
 
 **写作约定**：所有 "§x.y" 引用都指向 `requirements.md`；所有"@dsh/xxx" 引用都指向 `D:\programming\projects\study\dsh\packages\xxx`。
@@ -126,7 +126,7 @@ DSH 已有相当完整的底层（`D:\programming\projects\study\dsh`）。DSH T
 | Job runner | `@deepseek-ai/dsh-jobs-local` | 可选：离线 / 后台 dispatch | 1.0 不强制 |
 | Goal | `@deepseek-ai/dsh-goal` + `tool-goal` | **不混用**——DSH Team 自己有状态机（`§2.3`）| 跟 goal 子系统正交 |
 | LLM | `@deepseek-ai/dsh-llm-{deepseek,pi-ai,retry}` | DSH 调度者自己的 LLM | Member 走 ACP 走各自 LLM |
-| Client UI primitives | `@deepseek-ai/dsh-client-ui-*` | 常驻面板 UI | 复用 `ui-conversation` / `ui-layout` / `ui-tool` 等已有 Slot；新增 `client-ui-team-*` Slot 见 §7 |
+| Client UI primitives | `@deepseek-ai/dsh-client-ui-*`（DSH 框架定义 slot API） | 常驻面板 UI | 本仓即 DSH Team 体验的 host；`client-ui-*` 槽位实现组件由本仓 `ui/` 注册（见 §7），不再推到外部 DSH 包 |
 | `host/boot` 事件 | DSH host | 监听 | 触发 `TeamService.reconcileOnBoot` |
 | `host/shutdown` 事件 | DSH host | 监听 | 标记活跃 Run 为 `interrupted` 候选（由下次启动对账）|
 
@@ -810,7 +810,7 @@ DSH Team Service 在以下位置尊重此约束：
 
 ### 7.1 Slot 注入
 
-按 `§10.1 / B3`，常驻面板采用 Linear 风 app shell；**视觉细节（配色/字体/圆角/间距）留 UI backlog**（`§11.3`），本架构只规定**结构组件**与**Slot 注册点**。
+按 `§10.1 / B3`，常驻面板采用 Linear 风 app shell；**视觉细节（配色/字体/圆角/间距）归本仓 `ui/` 2.0 实现轮**（`§11.3` 列入留口），本架构只规定**结构组件**与**Slot 注册点**。
 
 **新加 Slot**（DSH Team 自己的 1.0 最小集合）：
 
@@ -821,43 +821,43 @@ DSH Team Service 在以下位置尊重此约束：
 
 注册方式：`@dsh/team` 的 `apply(ctx)` 内 `ctx.effect(() => slots.register('team-panel', { component: ... }))`，卸载自动清理（按 dsh-dual-plugin-guide "副作用必须可清理"原则）。
 
-**复用 Slot**：
+**复用 Slot**（DSH 框架定义 slot 名；本仓即 DSH Team 体验的 host，所有槽位实现由本仓 `ui/` + `lib/index.js` 注册的组件填充；不再推到外部包）：
 
-| Slot | 包 | 用途 |
+| Slot | 实现来源 | 用途 |
 |---|---|---|
-| `client-ui-layout` | `@deepseek-ai/dsh-client-ui-layout` | app shell（顶栏 + 侧栏 + 主区 + footer）|
-| `client-ui-conversation` | `@deepseek-ai/dsh-client-ui-conversation` | 主区 timeline（消息流）|
-| `client-ui-sidebar` | `@deepseek-ai/dsh-client-ui-sidebar` | 侧栏（活跃 + 历史 Team）|
-| `client-ui-tool` | `@deepseek-ai/dsh-client-ui-tool` | 工具调用呈现（dispatch / handoff 卡片）|
-| `client-ui-user-questions` | `@deepseek-ai/dsh-client-ui-user-questions` | 决策点事件卡片（输入框 + action 三选 + 消息一体，`§9.12.7`）|
-| `client-ui-plan` | `@deepseek-ai/dsh-client-ui-plan` | Plan 呈现（若 DSH 端有通用 plan UI）|
+| `client-ui-layout` | **本仓 `ui/layout.js`（2.0 路线）** | app shell（顶栏 + 侧栏 + 主区 + footer）|
+| `client-ui-conversation` | **本仓 `ui/conversation.js`（2.0 路线）** | 主区 timeline（消息流）|
+| `client-ui-sidebar` | **本仓 `ui/sidebar.js`（2.0 路线）** | 侧栏（活跃 + 历史 Team）|
+| `client-ui-tool` | **本仓 `ui/tool.js`（2.0 路线）** | 工具调用呈现（dispatch / handoff 卡片）|
+| `client-ui-user-questions` | **本仓 `ui/user-questions.js`（2.0 路线）** | 决策点事件卡片（输入框 + action 三选 + 消息一体，`§9.12.7`）|
+| `client-ui-plan` | **本仓 `ui/plan.js`（2.0 路线）** | Plan 呈现（与 `team-plan` slot 协同）|
 
 ### 7.2 面板布局（mockups/panel-linear.html）
 
-按 `§10.1`：
+按 `§10.1`（**本仓即 DSH Team 体验的 host；所有区域组件由本仓 `ui/` 实现，不再推到外部 DSH 端**）：
 
-| 区域 | 内容 | 实现 Slot |
+| 区域 | 内容 | 实现 Slot / 组件 |
 |---|---|---|
-| 顶栏 | brand + Team 运行状态 pill | `client-ui-layout` |
-| 左 sidebar | 活跃 Team + 历史 Team + 素材库入口 | `client-ui-sidebar` + `client-ui-team-panel` |
-| 主区头 | Team 名 + flow 类型 + 团队操作按钮 | `client-ui-team-panel` |
-| 主区成员栏 | chip 形式横向，状态点区分忙/闲 | `client-ui-team-member-chip` |
-| 主区 timeline | 消息气泡 + handoff 卡片 + A2A 消息气泡 | `client-ui-conversation` + `client-ui-team-handoff-card` |
-| 全局 footer | ACP / artifact / dispatch / message 计数 + 命令面板 | `client-ui-layout` |
+| 顶栏 | brand + Team 运行状态 pill | `client-ui-layout`（本仓 `ui/layout.js` 2.0 路线）|
+| 左 sidebar | 活跃 Team + 历史 Team + 素材库入口 | `client-ui-sidebar`（本仓 `ui/sidebar.js` 2.0 路线）|
+| 主区头 | Team 名 + flow 类型 + 团队操作按钮 | `team-panel`（本仓 `ui/team-panel.js`）+ `ui/main-header.js`（2.0 路线）|
+| 主区成员栏 | chip 形式横向，状态点区分忙/闲 | `team-panel`（成员栏）— `ui/team-member-chip.js` |
+| 主区 timeline | 消息气泡 + handoff 卡片 + A2A 消息气泡 | `client-ui-conversation`（本仓 `ui/conversation.js` 2.0 路线）+ `ui/team-handoff-card.js`（toolview 槽）|
+| 全局 footer | ACP / artifact / dispatch / message 计数 + 命令面板 | `client-ui-layout`（本仓 `ui/layout.js` 2.0 路线）|
 
 ### 7.3 事件流呈现
 
-按 `§10.2`：
+按 `§10.2`（**本仓即 host；下列元素全部由本仓 `ui/` 实现**）：
 
 | 元素 | 视觉 | 实现 |
 |---|---|---|
-| @mention | 聊天气泡 + 左侧 mention 边（黄色）| `client-ui-conversation` |
-| dispatch / handoff | 主区独立卡片 | `client-ui-team-handoff-card` |
-| handoff 退回 | 同一卡片，红色变体 | `client-ui-team-handoff-redo` |
-| A2A-style 消息 | 聊天气泡（无 mention 边）| `client-ui-conversation`（按 kind 区分）|
-| **用户介入（决策点响应）** | **决策点事件卡片** | `client-ui-user-questions` + `client-ui-team-decision-badge` |
-| in_reply_to 关系 | 一级虚线引导 | `client-ui-conversation` 自定义 |
-| 决策点等待信号 | 状态 pill 上小角标 | `client-ui-team-decision-badge` |
+| @mention | 聊天气泡 + 左侧 mention 边（黄色）| `ui/conversation.js`（本仓 2.0 路线）|
+| dispatch / handoff | 主区独立卡片 | `ui/team-handoff-card.js`（toolview 槽）|
+| handoff 退回 | 同一卡片，红色变体 | `ui/team-handoff-redo.js`（toolview 槽）|
+| A2A-style 消息 | 聊天气泡（无 mention 边）| `ui/conversation.js`（本仓 2.0 路线，按 kind 区分）|
+| **用户介入（决策点响应）** | **决策点事件卡片** | `ui/user-questions.js`（本仓 2.0 路线）+ `ui/team-decision-badge.js` |
+| in_reply_to 关系 | 一级虚线引导 | `ui/conversation.js`（本仓 2.0 路线，自定义渲染）|
+| 决策点等待信号 | 状态 pill 上小角标 | `ui/team-decision-badge.js` |
 
 **按 flow 自适应密度**（`§9.12.6`）：round-table 中 A2A 消息为主事件，timeline 主体就是它；pipeline / fan-out 中 A2A 是穿插。
 
@@ -1032,7 +1032,7 @@ Run 终态
 | 决策点等待时 DSH 调度者被换 session | `handoff-hermes` 文档结构（`§4.4`）含决策点等待状态；新 session 接管继续 |
 | Plan 生成跨轮记忆——`plan.derived_from` 取值域可能跨多个 Run | 引用式实现；需保证跨 Run 引用不被删除（`§5.6 引用锁`）|
 | acp 协议 context length 暴露不一致 | 各 adapter（hermes / mcode / claude-agent-acp）实现差异；200k 阈值检测在 subagent-acp 层需做 adapter-specific 适配 |
-| DSH handoff 期间 Run 长时间无调度者 | 成员 session 保活但无推进；UI 可加"无推进"暗示（`§4.4` 留 UI backlog）|
+| DSH handoff 期间 Run 长时间无调度者 | 成员 session 保活但无推进；本仓 `ui/team-panel.js` 加"无推进"暗示（`§4.4` 留 UI backlog，归本仓 2.0）|
 
 ### 11.2 开放问题（继承 `requirements.md §11.4`；2026-08-20 全部 closed）
 
@@ -1045,8 +1045,8 @@ Run 终态
 ### 11.3 后续讨论议题（`requirements.md §11.2 / §11.3` 留口）
 
 - 其他 Flow 模式（除圆桌/流水线/扇出外）——用户提"可能还有其他场景后续再说"
-- 暂停-恢复的 UI 暗示（机制不拍，UI 归属 DSH/UI 侧）——运行中 DSH 不在线时如何在 UI 上暗示"无推进"
-- 视觉细节 backlog（配色 / 字体 / 圆角 / 间距 / 决策点角标颜色 / A2A 消息密度渲染）
+- 暂停-恢复的 UI 暗示（机制不拍，UI 由本仓做）——运行中 DSH 不在线时如何在常驻面板上暗示"无推进"
+- 视觉细节 backlog（配色 / 字体 / 圆角 / 间距 / 决策点角标颜色 / A2A 消息密度渲染）——全部归本仓 `ui/`，2.0 路线展开
 - `read_only` 角色 + `orchestra_report` 通道（`§14.5 D8-1` 维持不做，等真实用户声音 / 合规审计需求）
 
 ---
@@ -1116,7 +1116,7 @@ Run 终态
 
 ## 15. 一句话总结
 
-DSH Team 是以**静态双格式 Cordis 插件**形态交付的、组合 `@dsh/subagent-acp` + `@dsh/skill` + `@dsh/client-ui-*` 等现有 DSH 能力的**协作调度层 + Linear 风 UI 层**；每 Member 一个独立 ACP 进程（各自不同 LLM）= 核心优势保留；五条协调日志 append-only + 单写入者=DSH；Adapter 集合封闭（首批 3 个 + opencode 预留）；UI 不暴露过程性介入，只暴露 abort + 决策点 + ad-hoc 门；Story 1/2/3 三 flow 1.0 全部支柱，验收口径跑通。
+DSH Team 是以**静态双格式 Cordis 插件**形态交付的、组合 `@dsh/subagent-acp` + `@dsh/skill` 等 DSH 运行时能力、并由本仓 `ui/` 自提供 `client-ui-*` 槽位全部组件的**协作调度层 + Linear 风 UI 层**；每 Member 一个独立 ACP 进程（各自不同 LLM）= 核心优势保留；五条协调日志 append-only + 单写入者=DSH；Adapter 集合封闭（首批 3 个 + opencode 预留）；UI 不暴露过程性介入，只暴露 abort + 决策点 + ad-hoc 门；Story 1/2/3 三 flow 1.0 全部支柱，验收口径跑通。**所有视觉细节 / 常驻面板 chrome / 决策点响应卡片 / ad-hoc 按钮 / 多 Team 视图 / 重跑按钮均由本仓承担，不再推到外部 DSH 端。**
 
 ---
 
@@ -1225,7 +1225,7 @@ interface FlowEngine {
 | `goal` | **不依赖** | DSH Team 自有状态机（§4.1）|
 | `jobs` | 可选 | 1.0 不依赖 |
 | `session-persistence` | 通过 subagent 间接依赖 | Member session 持久化 |
-| `client-ui-*` | **依赖** | 常驻面板 Slot（§7）|
+| `client-ui-*` | **本仓自提供** | 常驻面板 Slot（§7，由本仓 `ui/` 注册组件填充）|
 
 ---
 
