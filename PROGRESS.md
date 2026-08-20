@@ -1,10 +1,10 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = 待 commit · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `4ee5580` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 >
-> **范围重述（2026-08-20）**：本仓即 DSH Team 体验的 host——`client-ui-*` 槽位的实现组件、常驻面板 chrome（顶栏/sidebar/footer/主区头/团队操作按钮）、决策点响应卡片、ad-hoc 决策点按钮、多 Team 视图、重跑按钮、视觉细节 token、配置中心、Role/Member/TeamTemplate CRUD UI 全部归本仓；不再推到外部 DSH 端。
+> **范围重述（2026-08-20）**：本仓即 DSH Team 体验的 host——`client-ui-*` 槽位的实现组件（`client-ui-layout` 顶栏+footer / `client-ui-sidebar` / `client-ui-conversation` / `client-ui-user-questions` / `client-ui-tool` / `client-ui-plan`）、常驻面板 chrome（顶栏 / sidebar / footer / 主区头 / 团队操作按钮）、决策点响应卡片、ad-hoc 决策点按钮、多 Team 视图、重跑按钮、视觉细节 token（`ui/_react.js#tokens` Proxy + `getTokens()`）、配置中心表单（`ui/team-config.js#TeamConfigPanel` 3 tab）、Role/Member/TeamTemplate CRUD UI 与工具（`team.*_role / _member / _template` 共 9 个）全部归本仓；不再推到外部 DSH 端。
 
 ---
 
@@ -52,6 +52,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - `dsh --profile web --port 0` 启动验证过（`http://127.0.0.1:<port>`，stderr 空）
 - 装机后 P1.5-a / P1.5-b 的两个事件（`team-plan` slot + DP 桥）会在 reload 时自然启用，无需重新装机
 - 2.0 #1 的 joinRun / leaveRun 真实路径需要 `@deepseek-ai/dsh-subagent-acp` + 三个 adapter CLI（`hermes` / `mcode` / `claude-agent-acp`）一并装到同 profile；`cordis.patch.yml` 已声明三个 entry,DSH host 加载 cordis.yml 时自动起
+- 2.0 §2 全部 17 项闭环后,`client-ui-*` 6 个槽位 (`layout` / `sidebar` / `user-questions` / `conversation` / `tool` / `plan`) + `team-config` / `team-panel` / `team-plan` / `settings.section` slot 全部注册,DSH host 启动时通过 `lib/index.js#registerLayoutSlot` / `registerSidebarSlot` 等 6 个 registrar 串入 cordis 的 slot 树
 
 ### 1.3 远程仓库
 
@@ -133,8 +134,6 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **含义**: 5 OQ + 2 条 2.0 拍板记录 (parent resolution + 重跑 interrupted 语义) 全部 closed。2026-08-20 用户一次性签字 OQ-2/3/4/5（按推荐项），OQ-1 在 commit `aedbd10` 已实质闭环。措辞已写入 `docs/requirements.md §11.4` / `docs/architecture.md §11.2`，§4 即终稿。
 
----
-
 ## 4. 留口（不属于"未完成"，是"未来议题"）
 
 > 真正的"未来议题"——`requirements.md §11.2 / §11.3` + `architecture.md §11.3` 中**确实需要拍板或等触发条件**的项,不属于 §2 那种"已经知道怎么干、只是没排活"的工程任务。
@@ -146,42 +145,44 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 ---
 
-## 5. 推进顺序（建议）
+## 5. 推进顺序（建议 — 已闭环）
 
-### 第一批:配置中心(2.0 路线 A 类)
+`2026-08-20` A 类 + B 类 17 项按依赖递增推进,1 轮 commit 全部落地 (`4f3af37` + `4ee5580`)。两批互相独立,本轮**串行**推进(单 worker 串 A1→A8→B1→B11)。
+
+### 第一批:配置中心 + CRUD 工具 (2.0 路线 A 类 — 已闭环)
 ```
-A1 RoleService CRUD                       0.25d
-A2 TeamTemplateService CRUD               0.25d
-A3 MemberService 持久化 CRUD              0.25d
-A4 配置中心表单组件 (Role/Member/Template 3 tab)  0.5d
-A5 team-config + settings.section slot 重接  0.1d
-A6-A8 3 套 CRUD 工具 (role/member/template) 0.5d
+A1 RoleService CRUD                       0.25d  → commit 4f3af37
+A2 TeamTemplateService CRUD               0.25d  → commit 4f3af37
+A3 MemberService 持久化 CRUD              0.25d  → commit 4f3af37
+A4 配置中心表单组件 (Role/Member/Template 3 tab)  0.5d  → commit 4f3af37
+A5 team-config + settings.section slot 重接  0.1d  → commit 4f3af37
+A6-A8 3 套 CRUD 工具 (role/member/template) 0.5d  → commit 4f3af37
 ─────────────────────────────────────────────────
 小计                                      ~1.85d
 ```
-解锁:用户在 DSH 设置页 "Team" 项里能增删改 Role / Member / TeamTemplate,SKILL.md 引导可走通。
+**已解锁**: DSH 设置页 "Team" 项里能增删改 Role / Member / TeamTemplate,SKILL.md 引导可走通;`team-config` slot / `settings.section` slot 接 `TeamConfigPanel` (不再是错配的 `TeamPanel`)。
 
-### 第二批:UI chrome (B 类)
+### 第二批:UI chrome + 决策点响应 (2.0 路线 B 类 — 已闭环)
 ```
-B1 视觉 token 系统                         0.25d
-B2 顶栏 brand + Team 运行状态 pill        0.3d
-B3 左 sidebar 活跃 + 历史 Team + 素材库入口  0.4d
-B4 主区头 Team 名 + flow 类型 + 团队操作按钮 0.25d
-B5 全局 footer ACP/artifact/dispatch/message 计数  0.4d
-B6 决策点响应卡片 (输入框 + action 三选 + 消息一体)  0.5d
-B7 决策点角标 + "无推进"暗示              0.15d
-B8 主区 timeline + A2A 密度 + in_reply_to  0.5d
-B9 ad-hoc 决策点按钮 + 多 Team 视图 + 重跑按钮  0.3d
-B10-B11 tool / plan 通用呈现              0.2d
+B1 视觉 token 系统                         0.25d  → commit 4f3af37
+B2 顶栏 brand + Team 运行状态 pill        0.3d   → commit 4f3af37
+B3 左 sidebar 活跃 + 历史 Team + 素材库入口  0.4d   → commit 4f3af37
+B4 主区头 Team 名 + flow 类型 + 团队操作按钮 0.25d  → commit 4f3af37
+B5 全局 footer ACP/artifact/dispatch/message 计数  0.4d   → commit 4f3af37
+B6 决策点响应卡片 (输入框 + action 三选 + 消息一体)  0.5d   → commit 4f3af37
+B7 决策点角标 + "无推进"暗示              0.15d  → commit 4f3af37
+B8 主区 timeline + A2A 密度 + in_reply_to  0.5d   → commit 4f3af37
+B9 ad-hoc 决策点按钮 + 多 Team 视图 + 重跑按钮  0.3d   → commit 4f3af37
+B10-B11 tool / plan 通用呈现              0.2d   → commit 4f3af37
 ─────────────────────────────────────────────────
 小计                                      ~3.25d
 ```
-解锁:常驻面板 chrome 完整,决策点响应可点击,ad-hoc 介入按钮可见,多 Team 切换可达。
+**已解锁**: 常驻面板 chrome 完整,决策点响应可点击,ad-hoc 介入按钮可见,多 Team 切换可达;`client-ui-*` 6 个槽位 + `team-config` / `team-panel` / `team-plan` / `settings.section` 全部注册成功。
 
 ### 总计
-两批合计约 **5 天**;A 类与 B 类**互相独立**,可以并行排给两个 worker。
+两批合计约 **5 天**;A 类与 B 类**互相独立**,本轮串行落地。
 
-每一项完工动作: 代码 → smoke test → `node scripts/verify.mjs` → `node scripts/test-install.mjs` → commit → push → 回到本文件 §1 加 commit 记录 + §2 移走。
+每一项完工动作: 代码 → smoke test → `node scripts/verify.mjs` → `node scripts/test-install.mjs` → commit → push → 回到本文件 §1 加 commit 记录 + §2 标记 closed。**最终状态**: 17/17 closed, smoke 221 → 298 checks (+77), test-install 13/13 pass, 2 个新 commit (`4f3af37` + `4ee5580`) 已 push。
 
 ---
 
