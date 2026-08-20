@@ -19,7 +19,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node scripts/verify.mjs"
+    "check": "node scripts/verify.mjs",
+    "test-install": "node scripts/test-install.mjs"
   },
   "license": "MIT",
   "keywords": [

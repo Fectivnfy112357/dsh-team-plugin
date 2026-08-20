@@ -74,9 +74,6 @@ dsh --profile web --port 0
 
 验证：`node scripts/verify.mjs`（5 层 + 84 烟雾）独立于 DSH 跑，不依赖装到 DSH。
 
-## 与深度研究团队的关系
-
-仓库内已有的 `team-v3-design.md` / `team-v3-spec.md` 属于**深度研究团队**的设计文档（在 `docs/deep-research/` 下），是 DSH Team 插件的一个使用场景（Story 3），但**与本仓正交**——本仓的 `requirements.md` / `architecture.md` 是 DSH Team 插件本身的产品定义 + 实现架构，不专属深度研究。
 
 ## 写作边界
 
