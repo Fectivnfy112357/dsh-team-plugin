@@ -428,9 +428,12 @@ try {
     : bad(`handoffNormal variant=${handoffNormal?.props?.['data-variant']}`);
 
   const handoffRedo = TeamHandoffRedo({ from: 'critic', to: 'brain', reason: 'lacks detail', state: 'redo' });
-  handoffRedo && handoffRedo.type === TeamHandoffCard && handoffRedo.props.variant === 'redo' && handoffRedo.props.state === 'redo'
+  // The shim eagerly invokes functional components, so the returned
+  // element is the rendered TeamHandoffCard. We verify delegation by
+  // checking the rendered output's data-variant / data-state attrs.
+  handoffRedo && handoffRedo.props?.['data-variant'] === 'redo' && handoffRedo.props?.['data-state'] === 'redo'
     ? ok('TeamHandoffRedo delegates to TeamHandoffCard with variant=redo,state=redo')
-    : bad(`handoffRedo type=${handoffRedo?.type?.name ?? handoffRedo?.type} variant=${handoffRedo?.props?.variant}`);
+    : bad(`handoffRedo variant=${handoffRedo?.props?.['data-variant']} state=${handoffRedo?.props?.['data-state']}`);
 
   // 9c) TeamPanel composes the subcomponents when given a runMeta
   const panel = TeamPanel({
