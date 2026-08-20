@@ -2,7 +2,7 @@
 
 > **状态**：2026-08-18 第四轮产品形态拍板（v1 闭环）；2026-08-19 第五轮机制层全面扩展（abort 终态 / 失败处理 / Plan 机制 / 决策点 / 产物共享 / 多 Team UI / read_only 判定）。
 > 本文档是"需求层"——只定义产品形态、用户故事、产品规则、机制层（Team Run / Member Session / 消息路由 / Plan / 决策点 / 产物体系），不涉及具体技术实现（实现见 `architecture.md` 与本仓 `lib/` `services/` `ui/` `skills/`）。
-> 配套文档：[discussion-log.md](./discussion-log.md)（讨论过程，五轮）、[architecture.md](./architecture.md)（实现侧架构，v1 骨架）、[mockups/](./mockups/)（UI 草图）、[AGENTS.md](./AGENTS.md)（项目约定 + 仓库结构 + 写作边界分层）。
+> 配套文档：[discussion-log.md](discussion-log.md)（讨论过程，五轮）、[architecture.md](architecture.md)（实现侧架构，v1 骨架）、[mockups/](./mockups/)（UI 草图）、[AGENTS.md](../AGENTS.md)（项目约定 + 仓库结构 + 写作边界分层）。
 
 ---
 
@@ -1268,7 +1268,7 @@ decision_point_response = {
 
 ## 10. 常驻面板布局规范
 
-DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mockup [`mockups/panel-linear.html`](./mockups/panel-linear.html) 验证。本节只规定结构组件，**视觉细节（配色 / 字体 / 圆角 / 间距）留到后面单独定**。
+DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mockup [`mockups/panel-linear.html`](../mockups/panel-linear.html) 验证。本节只规定结构组件，**视觉细节（配色 / 字体 / 圆角 / 间距）留到后面单独定**。
 
 ### 10.1 区域结构
 

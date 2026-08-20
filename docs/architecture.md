@@ -10,10 +10,10 @@
 
 | 文档 | 角色 |
 |---|---|
-| [`requirements.md`](./requirements.md) | 产品形态 + 机制层定稿（做什么、规则是什么） |
-| [`discussion-log.md`](./discussion-log.md) | 七轮讨论过程、关键决策、被否决方案（为什么这么做） |
+| [`requirements.md`](requirements.md) | 产品形态 + 机制层定稿（做什么、规则是什么） |
+| [`discussion-log.md`](discussion-log.md) | 七轮讨论过程、关键决策、被否决方案（为什么这么做） |
 | [`architecture.md`](./architecture.md) | **本文件** — DSH 侧实现架构（怎么在 DSH 里实现） |
-| [`mockups/panel-linear.html`](./mockups/panel-linear.html) | 常驻面板 UI 骨架（Linear 风 app shell） |
+| [`mockups/panel-linear.html`](../mockups/panel-linear.html) | 常驻面板 UI 骨架（Linear 风 app shell） |
 
 **范围**：实现侧架构、组件划分、Service 接口骨架、关键事件、数据存储布局、生命周期与并发约束、与 DSH 已有能力的复用关系、实现阶段、仓根包结构。
 

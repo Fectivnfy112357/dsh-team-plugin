@@ -1,7 +1,7 @@
 # DSH Team 插件 — 讨论过程（2026-08-18 / 2026-08-19）
 
 > 本文档记录产品形态的讨论路径，保留每一轮的关键决策和被否决的方案。
-> 定稿请看 [requirements.md](./requirements.md)。
+> 定稿请看 [requirements.md](requirements.md)。
 
 ## 轮次索引
 
@@ -183,7 +183,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 
 ## 4. 第二轮讨论（2026-08-18）
 
-第二轮讨论从"设置界面"开始（方向 A），然后进入"协作交互"（方向 B）。本节按方向分组记录新决策与被否决方案。完整决策表见 [requirements.md §8](./requirements.md#8-已闭环的产品决策)（H–V 共 14 项），详细讨论过程见 [requirements.md §11](./requirements.md#11-2026-08-18-第二轮决策设置界面--协作交互)。
+第二轮讨论从"设置界面"开始（方向 A），然后进入"协作交互"（方向 B）。本节按方向分组记录新决策与被否决方案。完整决策表见 [requirements.md §8](requirements.md#8-已闭环的产品决策)（H–V 共 14 项），详细讨论过程见 [requirements.md §11](requirements.md#11-2026-08-18-第二轮决策设置界面--协作交互)。
 
 ### 4.1 方向 A — 设置界面
 
@@ -210,7 +210,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 | B1' | 核心逻辑归属 | DSH 原生插件；skill 是 thin wrapper | "注意核心逻辑是使用 dsh 的原生插件完成的，skill 只是入口，不要把核心能力放到 skill 里" |
 | B1'' | UI 角色 | 配置中心 + 常驻面板，不是启动入口 | "ui 只是个常驻面板，用来展示当前正在工作的团队以及成员" |
 | B2 | 组装策略 | 全局默认 + 单次可覆盖（auto / manual）| "设置成 auto 的话……如果没有的话，会自动组建团队" |
-| B3 | 常驻面板布局 | Linear 风 app shell（mockup 已通过 [`mockups/panel-linear.html`](./mockups/panel-linear.html) 落地）| "就按照这个来吧，要的只是这个布局……颜色包括细节设计到后边再说" |
+| B3 | 常驻面板布局 | Linear 风 app shell（mockup 已通过 [`mockups/panel-linear.html`](../mockups/panel-linear.html) 落地）| "就按照这个来吧，要的只是这个布局……颜色包括细节设计到后边再说" |
 | B4 | 6 种介入模式 | 全部砍掉 | "这些都不需要，开启团队后，目前版本无法手动介入操作" |
 | B5 | handoff vs @mention | handoff 主区独立卡片；@mention 气泡 + 左侧边 | — |
 
@@ -327,7 +327,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 
 ### 5.6 第三轮决策汇总
 
-完整 14 项新决策见 [requirements.md §8](./requirements.md#8-已闭环的产品决策)（M1 + Run-1~5 + H1~4 + DSH-1~4），详细讨论过程见 [requirements.md §13](./requirements.md#13-2026-08-18-第三轮决策核心机制team-run--member-session--self-handoff--dsh-handoff)。
+完整 14 项新决策见 [requirements.md §8](requirements.md#8-已闭环的产品决策)（M1 + Run-1~5 + H1~4 + DSH-1~4），详细讨论过程见 [requirements.md §13](requirements.md#13-2026-08-18-第三轮决策核心机制team-run--member-session--self-handoff--dsh-handoff)。
 
 ---
 
@@ -396,7 +396,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 
 ### 6.7 第四轮决策汇总
 
-完整 6 项新决策见 [requirements.md §8](./requirements.md#8-已闭环的产品决策)（M2~M7），详细讨论过程见 [requirements.md §14](./requirements.md#14-2026-08-18-第四轮决策混合架构a2a-style-消息)。
+完整 6 项新决策见 [requirements.md §8](requirements.md#8-已闭环的产品决策)（M2~M7），详细讨论过程见 [requirements.md §14](requirements.md#14-2026-08-18-第四轮决策混合架构a2a-style-消息)。
 
 ---
 
@@ -422,7 +422,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 - degraded 是成员级故障（≥1 非全部不可恢复），不是流程未达成——讨论不收敛绝不能推到 degraded
 - dispatch 终态三态化：`completed` / `failed` / `interrupted`（新增）
 
-**决策**：Q1-Q6 全部拍板，详见 [requirements.md §9.8](./requirements.md)。
+**决策**：Q1-Q6 全部拍板，详见 [requirements.md §9.8](requirements.md)。
 
 ### 7.2 议题 3：Discussion = Plan 机制（Q7-Q17 → §9.9）
 
@@ -445,7 +445,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 - `expected_artifact` 是 required = plan 产出资格的质检锚点（能产 plan 的收敛必有产出方向）
 - 决策点 vs plan/intent 区分：plan step(intent 任务域动词) ≠ a2a 消息(intent 消息域动词)
 
-**决策**：Q7-Q17 全部拍板，详见 [requirements.md §9.9](./requirements.md)。
+**决策**：Q7-Q17 全部拍板，详见 [requirements.md §9.9](requirements.md)。
 
 ### 7.3 §4 / Story 1 矛盾解决（Q18-Q21 → §9.10）
 
@@ -466,7 +466,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 - 持久化独立 `user-intervention-log.jsonl`（不混 a2a-message-log，不塞 dispatch context_refs）
 - 决策点等待 = running 下的"DSH 主动等待"子状态（非新状态机状态），超时 = 自动 continue = 决策点透明化
 
-**决策**：Q18-Q21 全部拍板，详见 [requirements.md §9.10](./requirements.md)。§4 重写（原 §4 整段替换）+ 新增 §4.3 介入持久化。
+**决策**：Q18-Q21 全部拍板，详见 [requirements.md §9.10](requirements.md)。§4 重写（原 §4 整段替换）+ 新增 §4.3 介入持久化。
 
 ### 7.4 议题 4 第一场：产物共享 + 版本管理（Q22 → §9.11）
 
@@ -484,7 +484,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 - 引用拆"记录"vs"注入"两步：原始记录 = user-intervention-log；注入 = DSH 处理时把 feedback 写进下一轮 dispatch 的 task 文本
 - 当前版本不清理（无 TTL / 无冷区）——不是"永不"，是"本版本不实现"，结构留口
 
-**决策**：Q22 全部拍板（Q22-1 ~ Q22-6），详见 [requirements.md §9.11](./requirements.md)。
+**决策**：Q22 全部拍板（Q22-1 ~ Q22-6），详见 [requirements.md §9.11](requirements.md)。
 
 ### 7.5 议题 4 第二场：多 Team UI + 历史切换 + A2A 消息（Q23-Q30 → §9.12）
 
@@ -509,7 +509,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 - **用户介入 = 决策点事件卡片（输入框+action+消息一体）**，不是红色气泡（红色 §10.2 已锁给 handoff 退回）
 - in_reply_to 一级虚线引导（reply 气泡底部指向被回复气泡）——不画完整线程树（round-table 链式接力会视觉爆炸）
 
-**决策**：Q23-Q30 全部拍板，详见 [requirements.md §9.12](./requirements.md)。
+**决策**：Q23-Q30 全部拍板，详见 [requirements.md §9.12](requirements.md)。
 
 ### 7.6 议题 4 第三场：read_only + orchestra_report（Q-M7 重开判定）
 
@@ -526,7 +526,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 
 **重开锚点**（不封死）：当出现"用户明确要求一个不参与讨论的独立观察者/裁判"（真实用户声音，不是机制推导）或"合规审计需要第三方独立报告"时，重开。当前两者都没有。
 
-**决策**：Q-M7 维持不做。详见 [requirements.md §14.5](./requirements.md)。
+**决策**：Q-M7 维持不做。详见 [requirements.md §14.5](requirements.md)。
 
 ### 7.7 第五轮核心 Trade-offs
 
@@ -541,7 +541,7 @@ docs/dsh-team-plugin/        ← 当时提议；现已简化为仓根
 
 ### 7.8 第五轮决策汇总
 
-完整 36 项决策见 [requirements.md §8](./requirements.md#8-已闭环的产品决策)（Q1~Q30 + Q-M7），详细机制收录于 [requirements.md §17](./requirements.md)。
+完整 36 项决策见 [requirements.md §8](requirements.md#8-已闭环的产品决策)（Q1~Q30 + Q-M7），详细机制收录于 [requirements.md §17](requirements.md)。
 
 ### 7.9 Open Questions（第五轮未拍板项）
 

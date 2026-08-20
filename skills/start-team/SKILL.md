@@ -6,7 +6,7 @@ whenToUse: 用户希望按 handoff-round-table / pipeline-with-feedback / fan-ou
 
 # start-team — DSH Team 启动入口
 
-DSH Team 插件把"角色 + 团队"的视角带入 DSH WebUI（详见 [`requirements.md`](../../requirements.md) / [`architecture.md`](../../architecture.md)）。
+DSH Team 插件把"角色 + 团队"的视角带入 DSH WebUI（详见 [`requirements.md`](../../docs/requirements.md) / [`architecture.md`](../../docs/architecture.md)）。
 
 `start-team` 是**用户启动入口**（需求 §4.1 锁定）：
 
@@ -146,4 +146,4 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 
 **当前阶段可跑通**：用户在 DSH 输入 `/start-team`，DSH agent 加载本 skill，但调 `team.start` 会返回"工具未注册"——这是预期，直到 P1 实施完毕。
 
-> 详细阶段划分见 [`architecture.md §12`](../../architecture.md)。
+> 详细阶段划分见 [`architecture.md §12`](../../docs/architecture.md)。
