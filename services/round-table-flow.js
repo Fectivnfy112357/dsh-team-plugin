@@ -15,12 +15,22 @@
  * member sessions. The convergence + max_rounds + DP machinery is fully
  * implemented; the "DSH -> member prompt" transport is the missing piece.
  *
+ * v2.0 #1 留口 (this revision) — flow engine rewiring:
+ *   - 邀请派单经 `dispatchTask` helper:有 ctx.subagents 时走
+ *     `MemberService.dispatch`(写 dispatch-log + 调 followup + auto-join),
+ *     否则回退到 v1.0 纯日志路径
+ *   - A2A system-wake 保留:inbox 投递仍由 `MessageService.send` 完成,
+ *     跟 dispatchTask 是两条互补的轨迹(a2a-log 给 timeline,dispatch-log
+ *     给 runtime 调度)
+ *   - 唯一写入者承诺不变
+ *
  * @module dsh-team-plugin/round-table-flow
  */
 import { readMeta, transition } from './team-service.js';
-import { dispatch as dispatchLog } from './dispatch-service.js';
+import { dispatch as dispatchLog, markTerminal as markDispatchTerminal } from './dispatch-service.js';
 import { send as sendA2A } from './message-service.js';
 import { open as openDp, respond as respondDp, checkTimeouts, waitingDecisions, get as getDp } from './decision-point-service.js';
+import { dispatch as memberDispatch } from './member-service.js';
 
 /**
  * Drive a handoff-round-table run to terminal.
@@ -53,8 +63,9 @@ export async function runRoundTable(runId, initialMeta, ctx) {
       continue; // continue = user said 'continue';下一轮 (feedback 已写入 inbox,流到下轮 prompt)
     }
 
-    // 2) 向当前全部成员逐一发送发言邀请 (logged dispatch; v1.0 stub)
-    await inviteAllMembers(runId, meta, round);
+    // 2) 向当前全部成员逐一发送发言邀请 (v2.0 #1 留口: ctx 透传,生产环境走
+    //    MemberService.dispatch 真实驱动子代理;无 ctx 回退到 v1.0 纯日志)
+    await inviteAllMembers(ctx, runId, meta, round);
 
     // 3) Wait for replies: in v1.0 there is no transport; we instead just
     //    let the DSH LLM observe the dispatch-log and either call
@@ -147,18 +158,61 @@ async function handleDecisionGate(runId, ctx, kind, { prompt, contextRefs }) {
 }
 
 /**
+ * Issue a task to a member. v2.0 #1 留口 flow engine rewiring:
+ *   - If `ctx?.subagents?.followup` is available, drive the real subagent
+ *     via `MemberService.dispatch` (writes dispatch-log + calls followup,
+ *     auto-joins if the member isn't already running).
+ *   - Otherwise (smoke-test / no-DSH-runtime) fall back to the v1.0
+ *     `dispatchLog` which only writes the dispatch-log row.
+ *
+ * @param {any} ctx - DSH Cordis ctx (may be null for tests)
+ * @param {string} runId
+ * @param {string} memberId
+ * @param {{
+ *   task: string,
+ *   contextRefs?: string[],
+ *   seq: number,
+ *   signal?: AbortSignal,
+ * }} opts
+ * @returns {Promise<{ id: string, joinedNow?: boolean, childId?: string }>}
+ */
+export async function dispatchTask(ctx, runId, memberId, opts) {
+  if (ctx?.subagents?.followup) {
+    const r = await memberDispatch(ctx, runId, memberId, {
+      task: opts.task,
+      contextRefs: opts.contextRefs ?? [],
+      ...(ctx?.parent ? { parent: ctx.parent } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    return { id: r.dispatchId, joinedNow: r.joinedNow, childId: r.childId };
+  }
+  return dispatchLog({
+    run_id: runId,
+    to: memberId,
+    task: opts.task,
+    context_refs: opts.contextRefs ?? [],
+    seq: opts.seq,
+  });
+}
+
+/**
  * Log a dispatch to each member ("invite to speak"). v1.0 stub — there is
  * no subagent transport yet. The dispatch-log entries are what the panel
  * will render as the "first dispatch" / "round boundary" markers.
+ *
+ * v2.0 #1 留口 rewiring: in production, `ctx` carries a subagent runtime
+ * and `dispatchTask` drives the real child via followup. The system-wake
+ * A2A delivery stays regardless of path (it's the timeline-visible nudge;
+ * the dedup window is 5s — fine for the per-round cadence).
+ *
+ * @param {any} ctx - DSH Cordis ctx (may be null for tests)
  */
-async function inviteAllMembers(runId, meta, round) {
+async function inviteAllMembers(ctx, runId, meta, round) {
   let seq = 1;
   for (const m of meta.members) {
-    await dispatchLog({
-      run_id: runId,
-      to: m.member_id,
+    await dispatchTask(ctx, runId, m.member_id, {
       task: `第 ${round + 1} 轮发言邀请`,
-      context_refs: [],
+      contextRefs: [],
       seq: seq++,
     });
     // also drop a system-wake to the member's inbox (the wake dedup window

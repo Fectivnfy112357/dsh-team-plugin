@@ -1239,6 +1239,320 @@ try {
   pipeSvc.signalStepTerminal(cleanRunId, 1, 'complete', { produced_artifact_ids: ['done'] });
   await cleanPromise;
 
+  // ---- 12c. PipelineFlow: 2.0 #1 留口 flow engine rewiring (real subagent drive) ----
+  console.log('\n[12c/19] PipelineFlow (2.0 #1 留口 real subagent drive)');
+  pipeSvc._resetForTests();
+  memberSvc._resetForTests();
+  // Build a mock ctx that records followup + startContinuable calls (same
+  // pattern as the [9j] / [9h] tests). The flow's `dispatchTask` helper
+  // sees `ctx.subagents.followup` and routes to MemberService.dispatch
+  // (which writes the dispatch-log row AND fires followup).
+  const followupCalls3 = [];
+  const startCalls3 = [];
+  const interruptCalls3 = [];
+  const ctxPipeRe = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        startCalls3.push(spec);
+        return { childId: `child-pipe-${startCalls3.length}-${Date.now().toString(36)}`, messageId: `msg-pipe-${startCalls3.length}` };
+      },
+      followup: async (parent, childId, content, options) => {
+        followupCalls3.push({ parent, childId, content, options });
+        return `fup-pipe-${followupCalls3.length}`;
+      },
+      interrupt: async (targetSessionId, authority) => {
+        interruptCalls3.push({ targetSessionId, authority });
+      },
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+    parent: { id: 'agent-scheduler', session: { id: 'sess-sched' } },
+  };
+  const reMeta = await ts.start({
+    taskDescription: 'rewired pipeline',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'brain', task: 'first', intent: 'produce' },
+        { member_id: 'critic', task: 'second', intent: 'review' },
+      ],
+    },
+    members: [
+      { member_id: 'brain', instance_alias: 'b' },
+      { member_id: 'critic', instance_alias: 'c' },
+    ],
+  });
+  const reRunId = reMeta.id;
+  await ts.markHolder(reRunId);
+  await ts.transition(reRunId, 'pending', 'assembling', 'team-formed');
+  const reStartBefore = startCalls3.length;
+  const reFollowupBefore = followupCalls3.length;
+  const rePromise = flowSvc.run(reRunId, ctxPipeRe);
+  await new Promise((r) => setTimeout(r, 100));
+  // After 1st dispatch: the flow has dispatched step 0 (auto-joins brain +
+  // fires followup) and is now waiting on the in-memory step terminal
+  // signal. So we expect exactly +1 start (brain join) and +1 followup
+  // (the dispatch followup to brain). Step 1's dispatch hasn't run yet.
+  startCalls3.length === reStartBefore + 1
+    ? ok('rewired pipeline: dispatchTask auto-joins step 0 member via startContinuable')
+    : bad(`startCalls3 added=${startCalls3.length - reStartBefore} (expected 1)`);
+  followupCalls3.length === reFollowupBefore + 1
+    ? ok('rewired pipeline: dispatchTask calls followup on step 0 dispatch')
+    : bad(`followupCalls3 added=${followupCalls3.length - reFollowupBefore} (expected 1)`);
+  // Complete step 0 -> step 1's dispatch should auto-derive context_refs
+  // from step 0's produced_artifact_ids (proves rewiring + #4 both work)
+  const step0StartBefore = startCalls3.length;
+  const step0FollowupBefore = followupCalls3.length;
+  pipeSvc.signalStepTerminal(reRunId, 0, 'complete', { produced_artifact_ids: ['rewired-art'] });
+  await new Promise((r) => setTimeout(r, 100));
+  startCalls3.length === step0StartBefore + 1
+    ? ok('rewired pipeline: after step 0 complete, step 1 auto-joins critic via startContinuable')
+    : bad(`startCalls3 added=${startCalls3.length - step0StartBefore} (expected 1 for critic)`);
+  followupCalls3.length === step0FollowupBefore + 1
+    ? ok('rewired pipeline: after step 0 complete, step 1 dispatch fires followup')
+    : bad(`followupCalls3 added=${followupCalls3.length - step0FollowupBefore} (expected 1)`);
+  // The latest followup (step 1's) should have a content block referencing
+  // 'rewired-art' (composeDispatchPrompt formats context_refs into the prompt)
+  const lastFup = followupCalls3[followupCalls3.length - 1];
+  const lastFupText = lastFup?.content?.[0]?.text ?? '';
+  /rewired-art/.test(lastFupText)
+    ? ok('rewired pipeline: step 1 followup prompt carries step 0 produced_artifact_ids (context_refs propagated to MemberService.dispatch)')
+    : bad(`lastFup text=${JSON.stringify(lastFupText)}`);
+  pipeSvc.signalStepTerminal(reRunId, 1, 'complete', { produced_artifact_ids: ['done-rewired'] });
+  const reResult = await rePromise;
+  reResult.terminal === 'succeeded' ? ok('rewired pipeline terminal: succeeded') : bad(`terminal=${reResult.terminal}`);
+  // dispatch-log still has the single-writer rows (MemberService.dispatch
+  // appends `from: scheduler, to: member, context_refs` per the contract)
+  const reDl = readFileSync(join(paths.teamRunsDir, reRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const reSchedulerRows = reDl.filter((r) => r.from === 'scheduler' && (r.to === 'brain' || r.to === 'critic'));
+  reSchedulerRows.length === 2
+    ? ok('rewired pipeline: dispatch-log has 2 scheduler rows (single-writer contract preserved)')
+    : bad(`reSchedulerRows.len=${reSchedulerRows.length}`);
+  const reCriticRow = reSchedulerRows.find((r) => r.to === 'critic');
+  Array.isArray(reCriticRow?.context_refs) && reCriticRow.context_refs.includes('rewired-art')
+    ? ok('rewired pipeline: critic dispatch row carries derived context_refs')
+    : bad(`reCriticRow=${JSON.stringify(reCriticRow)}`);
+  // session-state.json for both members should show state=running (auto-joined)
+  const reBrainSess = JSON.parse(readFileSync(join(paths.teamRunsDir, reRunId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  const reCriticSess = JSON.parse(readFileSync(join(paths.teamRunsDir, reRunId, 'sessions', 'critic', 'session-state.json'), 'utf-8'));
+  reBrainSess.state === 'running' && reCriticSess.state === 'running'
+    ? ok('rewired pipeline: both members have session-state.state=running after auto-join')
+    : bad(`brain=${reBrainSess.state} critic=${reCriticSess.state}`);
+  // dispatchTask standalone: smoke-test the helper directly with a mock ctx
+  // to verify shape (no need to spin up a full run for this one)
+  const dtCtx = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async () => ({ childId: 'c1', messageId: 'm1' }),
+      followup: async () => 'f1',
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes'],
+    },
+    parent: { id: 'p' },
+  };
+  const dtRunId = 'pipe-dt-isolate';
+  // Member lookup requires a real session-state.json, so we skip the actual
+  // member service and verify dispatchTask fall-back to dispatchLog on no-subagent
+  const dtFallback = await pipeSvc.dispatchTask(null, 'dt-fallback-run', 'fake-member', {
+    task: 'fallback task', contextRefs: ['a'], seq: 7,
+  });
+  dtFallback && dtFallback.id && dtFallback.id.includes('dt-fallback-run')
+    ? ok('dispatchTask falls back to dispatchLog when ctx has no subagents.followup')
+    : bad(`dtFallback=${JSON.stringify(dtFallback)}`);
+  // dispatchTask with subagents but no member catalog: memberService.dispatch
+  // throws. Verify the error propagates rather than being swallowed.
+  let dtError = null;
+  try {
+    await pipeSvc.dispatchTask(dtCtx, 'dt-err-run', 'no-such-member', {
+      task: 'err task', contextRefs: [], seq: 1,
+    });
+  } catch (e) { dtError = e; }
+  dtError && /no such member|unknown member|no session-state/.test(String(dtError.message))
+    ? ok('dispatchTask propagates memberService errors (no swallow) when subagent path fails')
+    : bad(`dtError=${dtError?.message}`);
+  void dtRunId;
+
+  // ---- 12d. RoundTableFlow: 2.0 #1 留口 real subagent drive ----
+  console.log('\n[12d/19] RoundTableFlow (2.0 #1 留口 real subagent drive)');
+  const rtSvc = await importService('services/round-table-flow.js');
+  msgSvc._resetForTests();
+  memberSvc._resetForTests();
+  const ctxRt = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async () => ({ childId: 'rt-child', messageId: 'rt-msg' }),
+      followup: async () => 'rt-fup',
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+    parent: { id: 'p' },
+  };
+  // dispatchTask fallback (no subagents)
+  const rtFallback = await rtSvc.dispatchTask(null, 'rt-fb', 'fake', { task: 't', contextRefs: [], seq: 1 });
+  rtFallback && rtFallback.id
+    ? ok('round-table dispatchTask falls back to dispatchLog when ctx has no subagents')
+    : bad(`rtFallback=${JSON.stringify(rtFallback)}`);
+
+  // ---- 12e. FanOutFlow: 2.0 #1 留口 real subagent drive ----
+  console.log('\n[12e/19] FanOutFlow (2.0 #1 留口 real subagent drive)');
+  const foSvcRewire = await importService('services/fan-out-flow.js');
+  foSvcRewire._resetForTests();
+  dpSvc._resetForTests();
+  memberSvc._resetForTests();
+
+  // ---- 12f. team.start tool: __dshCtx closure-capture (flow engine rewiring wire) ----
+  console.log('\n[12f/19] team.start tool wraps ctx as args.__dshCtx');
+  // Verify the tool's execute reads `args.__dshCtx` and passes it to flowSvc.run.
+  // We invoke the tool's execute directly with a mock ctx; the flow engine will
+  // be kicked off, dispatchTask will use memberService.dispatch, and we
+  // verify the followup / start calls were made against our mock ctx.
+  const { teamTools } = await importService('lib/tools/team-tools.js');
+  const teamStart = teamTools.find((t) => t.name === 'team.start');
+  teamStart && teamStart.execute
+    ? ok('team.start tool is registered with an execute function')
+    : bad('team.start missing execute');
+  // Build a mock ctx and call team.start.execute with __dshCtx
+  const startFup = [];
+  const startStart = [];
+  const capturedCtx = { sentinel: 'this-is-the-ctx' };
+  const ctxForTool = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        startStart.push({ spec, ctx: capturedCtx });
+        return { childId: `ts-${startStart.length}-${Date.now().toString(36)}`, messageId: `tsm-${startStart.length}` };
+      },
+      followup: async () => {
+        startFup.push('fup');
+        return 'fup-ts';
+      },
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes'],
+    },
+    parent: { id: 'tool-sched' },
+    ...capturedCtx,
+  };
+  // team.start.execute expects only the args shape; we add __dshCtx manually
+  // to mirror what the lib/index.js wrapper does at registration time.
+  const toolRunMeta = await teamStart.execute({
+    taskDescription: 'team.start tool test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'brain', task: 'only step', intent: 'produce' },
+      ],
+    },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+    __dshCtx: ctxForTool,
+  });
+  toolRunMeta && toolRunMeta.runId && toolRunMeta.state === 'pending'
+    ? ok('team.start.execute returns runId + state=pending')
+    : bad(`toolRunMeta=${JSON.stringify(toolRunMeta)}`);
+  // Give the flow engine a moment to dispatch step 0
+  await new Promise((r) => setTimeout(r, 200));
+  // startStart should have grown (flow dispatched step 0 -> auto-join brain)
+  startStart.length >= 1
+    ? ok('team.start.execute → flowSvc.run → dispatchTask → MemberService.dispatch → ctx.subagents.startContinuable fired')
+    : bad(`startStart.len=${startStart.length}`);
+  startFup.length >= 1
+    ? ok('team.start.execute → flow engine fired followup on the dispatched member')
+    : bad(`startFup.len=${startFup.length}`);
+  // Clean up: signal the step so the run reaches terminal and cleans up
+  pipeSvc.signalStepTerminal(toolRunMeta.runId, 0, 'complete', { produced_artifact_ids: ['ts-art'] });
+  await new Promise((r) => setTimeout(r, 100));
+  const ctxFo = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => ({ childId: `fo-${Date.now()}`, messageId: `fo-msg-${Date.now()}` }),
+      followup: async () => 'fo-fup',
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+    parent: { id: 'p' },
+  };
+  // dispatchTask fallback
+  const foFallback = await foSvcRewire.dispatchTask(null, 'fo-fb', 'fake', { task: 't', contextRefs: [], seq: 1 });
+  foFallback && foFallback.id
+    ? ok('fan-out dispatchTask falls back to dispatchLog when ctx has no subagents')
+    : bad(`foFallback=${JSON.stringify(foFallback)}`);
+  // Full rewired fan-out: 2 parallel branches + aggregator, mock ctx with
+  // recording followup. Verify auto-join, followup, aggregator context_refs.
+  const followupFo = [];
+  const startFo = [];
+  const ctxFoFull = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        startFo.push(spec);
+        return { childId: `fo-c-${startFo.length}-${Date.now().toString(36)}`, messageId: `fo-m-${startFo.length}` };
+      },
+      followup: async (parent, childId, content) => {
+        followupFo.push({ parent, childId, content });
+        return `fup-fo-${followupFo.length}`;
+      },
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes'],
+    },
+    parent: { id: 'fo-sched' },
+  };
+  const foReMeta = await ts.start({
+    taskDescription: 'rewired fan-out',
+    flow: 'fan-out-collect',
+    flowConfig: {
+      parallel: [
+        { member_id: 'brain', task: 'lookup a' },
+        { member_id: 'critic', task: 'lookup b' },
+      ],
+      aggregator: { member_id: 'brain', task: 'merge results' },
+    },
+    members: [
+      { member_id: 'brain', instance_alias: 'b' },
+      { member_id: 'critic', instance_alias: 'c' },
+    ],
+  });
+  const foReId = foReMeta.id;
+  await ts.markHolder(foReId);
+  await ts.transition(foReId, 'pending', 'assembling', 'team-formed');
+  const foRePromise = flowSvc.run(foReId, ctxFoFull);
+  await new Promise((r) => setTimeout(r, 100));
+  // 2 parallel branches auto-join + 2 followups
+  startFo.length === 2 ? ok('rewired fan-out: 2 parallel branches auto-join via startContinuable') : bad(`startFo.len=${startFo.length}`);
+  followupFo.length === 2 ? ok('rewired fan-out: 2 parallel branch dispatches fire followup') : bad(`followupFo.len=${followupFo.length}`);
+  foSvcRewire.signalBranchTerminal(foReId, 'brain', 'complete', { produced_artifact_ids: ['a1'] });
+  foSvcRewire.signalBranchTerminal(foReId, 'critic', 'complete', { produced_artifact_ids: ['b1'] });
+  await new Promise((r) => setTimeout(r, 100));
+  // Aggregator should have reused the existing brain session (no new start)
+  // and fired one followup for the merge task with the completed artifacts
+  // as context_refs.
+  followupFo.length === 3 ? ok('rewired fan-out: aggregator dispatch fires followup on reused session') : bad(`followupFo after branches=${followupFo.length}`);
+  // The aggregator followup prompt should carry the completed artifacts
+  const aggFup = followupFo[followupFo.length - 1];
+  const aggText = aggFup?.content?.[0]?.text ?? '';
+  /a1/.test(aggText) && /b1/.test(aggText)
+    ? ok('rewired fan-out: aggregator followup prompt carries completed_members.artifacts (context_refs propagated)')
+    : bad(`aggText=${JSON.stringify(aggText)}`);
+  foSvcRewire.signalBranchTerminal(foReId, 'brain', 'complete', { produced_artifact_ids: ['merged'] });
+  const foReResult = await foRePromise;
+  foReResult.terminal === 'succeeded' ? ok('rewired fan-out terminal: succeeded (2 parallel + aggregator)') : bad(`terminal=${foReResult.terminal}`);
+
   // ---- 13. FanOut happy path: 2 branches, no pre-flight, both complete ----
   console.log('\n[13/19] FanOut (happy path)');
   const foSvc = await importService('services/fan-out-flow.js');

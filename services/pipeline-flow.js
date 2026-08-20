@@ -16,7 +16,7 @@
  *   - in-memory step waiter Promise;DSH 进程是唯一持有者
  *   - feedback loop: 重派同 target + 上一轮 feedback
  *
- * v2.0 #4 (this revision):
+ * v2.0 #4:
  *   - step → next-step `context_refs` 自动传播:记 `stepOutputs[i]`,
  *     派下一步时默认从 `stepOutputs[i-1].produced_artifact_ids` 派生
  *   - `flow_config.context_refs_override[stepIndex]` 显式覆盖(可选)
@@ -24,11 +24,23 @@
  *   - feedback retry 路径**不**自动带前步 produced_artifact_ids(同 member
  *     同 task,前步产物自然有)
  *
+ * v2.0 #1 留口 (this revision) — flow engine rewiring:
+ *   - 派单经 `dispatchTask` helper:有 ctx.subagents 时走
+ *     `MemberService.dispatch`(写 dispatch-log + 调 followup),
+ *     否则回退到 `dispatchLog` 纯日志(向后兼容 v1.0 smoke-test)
+ *   - 唯一写入者承诺不变(DSH 仍是 dispatch-log 唯一 writer;
+ *     MemberService.dispatch 内部 append 一行 `from: scheduler, to: member` +
+ *     `joined_now` 字段)
+ *   - in-memory step waiter 不变: `signalStepTerminal` 仍是 test /
+ *     production 共同的"step 完成"信号(子代理在 DSH 内部会被宿主
+ *     settlement delivery 路径解析为 `team.complete_step` 工具调用)
+ *
  * @module dsh-team-plugin/pipeline-flow
  */
 import { readMeta, transition, writeMeta } from './team-service.js';
 import { dispatch as dispatchLog, markTerminal as markDispatchTerminal, handoff as handoffLog } from './dispatch-service.js';
 import { open as openDp, get as getDp } from './decision-point-service.js';
+import { dispatch as memberDispatch } from './member-service.js';
 
 /** @typedef {{
  *   member_id: string,
@@ -68,6 +80,47 @@ function getStepOutputs(runId) {
  * or when the engine is torn down). @param {string} runId */
 export function _resetStepOutputsForTests(runId) {
   _stepOutputs.delete(runId);
+}
+
+/**
+ * Issue a task to a member. v2.0 #1 留口 flow engine rewiring:
+ *   - If `ctx?.subagents?.followup` is available, drive the real subagent
+ *     via `MemberService.dispatch` (writes dispatch-log + calls followup,
+ *     auto-joins if the member isn't already running).
+ *   - Otherwise (smoke-test / no-DSH-runtime) fall back to the v1.0
+ *     `dispatchLog` which only writes the dispatch-log row.
+ *
+ * Both paths return `{ id, ... }` so downstream callers (markDispatchTerminal)
+ * can use the same shape regardless of branch.
+ *
+ * @param {any} ctx - DSH Cordis ctx (may be null for tests)
+ * @param {string} runId
+ * @param {string} memberId
+ * @param {{
+ *   task: string,
+ *   contextRefs?: string[],
+ *   seq: number,
+ *   signal?: AbortSignal,
+ * }} opts
+ * @returns {Promise<{ id: string, joinedNow?: boolean, childId?: string }>}
+ */
+export async function dispatchTask(ctx, runId, memberId, opts) {
+  if (ctx?.subagents?.followup) {
+    const r = await memberDispatch(ctx, runId, memberId, {
+      task: opts.task,
+      contextRefs: opts.contextRefs ?? [],
+      ...(ctx?.parent ? { parent: ctx.parent } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    return { id: r.dispatchId, joinedNow: r.joinedNow, childId: r.childId };
+  }
+  return dispatchLog({
+    run_id: runId,
+    to: memberId,
+    task: opts.task,
+    context_refs: opts.contextRefs ?? [],
+    seq: opts.seq,
+  });
 }
 
 /** v2.0 #4: derive the default `context_refs` for a given step.
@@ -223,14 +276,14 @@ export async function runPipeline(runId, initialMeta, ctx) {
         reason: 'step-start',
         seq: i + 1,
       });
-      // DSH -> member dispatch (the actual work). v2.0 #4: pass the
-      // derived/step-level `stepContextRefs` so cross-step propagation
-      // works without the caller having to plumb artifacts manually.
-      const dispatched = await dispatchLog({
-        run_id: runId,
-        to: step.member_id,
+      // DSH -> member dispatch (the actual work). v2.0 #1 留口 rewiring:
+      // `dispatchTask` selects MemberService.dispatch (real subagent drive)
+      // when ctx has subagents.followup, else falls back to dispatchLog.
+      // v2.0 #4: pass the derived/step-level `stepContextRefs` so cross-step
+      // propagation works without the caller plumbing artifacts manually.
+      const dispatched = await dispatchTask(ctx, runId, step.member_id, {
         task: feedback ? `${step.task}\n\nFeedback from prior attempt: ${feedback}` : step.task,
-        context_refs: stepContextRefs,
+        contextRefs: stepContextRefs,
         seq: i + 1,
       });
       dispatchResult = dispatched;

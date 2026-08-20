@@ -14,11 +14,20 @@
  *     工具显式提供 (类似 pipeline.complete_step)
  *   - 物理并发 cap = 4 是 const (直接引用宿主 ACP adapter §9.12.9)
  *
+ * v2.0 #1 留口 (this revision) — flow engine rewiring:
+ *   - 派单经 `dispatchTask` helper:有 ctx.subagents 时走
+ *     `MemberService.dispatch`(写 dispatch-log + 调 followup + auto-join),
+ *     否则回退到 v1.0 纯日志路径
+ *   - aggregator 的 `context_refs = completedArtifacts` 同样经
+ *     `MemberService.dispatch` 传递(a2a/inbox + followup 都看到产物)
+ *   - 唯一写入者承诺不变
+ *
  * @module dsh-team-plugin/fan-out-flow
  */
 import { readMeta, transition, writeMeta, setDegraded } from './team-service.js';
 import { dispatch as dispatchLog, markTerminal as markDispatchTerminal, handoff as handoffLog } from './dispatch-service.js';
 import { open as openDp, get as getDp } from './decision-point-service.js';
+import { dispatch as memberDispatch } from './member-service.js';
 
 /** Hard cap on physical concurrency. Per architecture §9.12.9, this is
  * the ACP adapter ThreadPoolExecutor size (NOT a plugin-level decision). */
@@ -59,6 +68,44 @@ function drainPendingSignal(runId, memberId) {
   const s = _pendingSignals.get(k);
   if (s) _pendingSignals.delete(k);
   return s ?? null;
+}
+
+/**
+ * Issue a task to a member. v2.0 #1 留口 flow engine rewiring:
+ *   - If `ctx?.subagents?.followup` is available, drive the real subagent
+ *     via `MemberService.dispatch` (writes dispatch-log + calls followup,
+ *     auto-joins if the member isn't already running).
+ *   - Otherwise (smoke-test / no-DSH-runtime) fall back to the v1.0
+ *     `dispatchLog` which only writes the dispatch-log row.
+ *
+ * @param {any} ctx - DSH Cordis ctx (may be null for tests)
+ * @param {string} runId
+ * @param {string} memberId
+ * @param {{
+ *   task: string,
+ *   contextRefs?: string[],
+ *   seq: number,
+ *   signal?: AbortSignal,
+ * }} opts
+ * @returns {Promise<{ id: string, joinedNow?: boolean, childId?: string }>}
+ */
+export async function dispatchTask(ctx, runId, memberId, opts) {
+  if (ctx?.subagents?.followup) {
+    const r = await memberDispatch(ctx, runId, memberId, {
+      task: opts.task,
+      contextRefs: opts.contextRefs ?? [],
+      ...(ctx?.parent ? { parent: ctx.parent } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    return { id: r.dispatchId, joinedNow: r.joinedNow, childId: r.childId };
+  }
+  return dispatchLog({
+    run_id: runId,
+    to: memberId,
+    task: opts.task,
+    context_refs: opts.contextRefs ?? [],
+    seq: opts.seq,
+  });
 }
 
 /**
@@ -132,11 +179,10 @@ export async function runFanOut(runId, initialMeta, ctx) {
   while (nextIndex < parallel.length || inFlight.size > 0) {
     while (inFlight.size < PHYSICAL_CONCURRENCY_CAP && nextIndex < parallel.length) {
       const p = parallel[nextIndex++];
-      const dispatched = await dispatchLog({
-        run_id: runId,
-        to: p.member_id,
+      // v2.0 #1 留口: dispatchTask 走 MemberService.dispatch (生产) / dispatchLog (legacy test)
+      const dispatched = await dispatchTask(ctx, runId, p.member_id, {
         task: p.task,
-        context_refs: p.context_refs ?? [],
+        contextRefs: p.context_refs ?? [],
         seq,
       });
       seq += 1;
@@ -190,11 +236,10 @@ export async function runFanOut(runId, initialMeta, ctx) {
 
   // ---- aggregator 派发 (如果有) ----
   if (aggregator) {
-    const dispatched = await dispatchLog({
-      run_id: runId,
-      to: aggregator.member_id,
+    // v2.0 #1 留口: aggregator 同样经 dispatchTask (production: 真实 followup)
+    const dispatched = await dispatchTask(ctx, runId, aggregator.member_id, {
       task: aggregator.task,
-      context_refs: completedArtifacts,
+      contextRefs: completedArtifacts,
       seq: seq++,
     });
     const sig = await waitForBranchTerminal(runId, aggregator.member_id);
