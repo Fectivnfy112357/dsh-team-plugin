@@ -5,7 +5,11 @@ description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成�
 
 # start-team — DSH Team 启动入口
 
-> 产品形态 / 数据结构详见 [`docs/requirements.md`](../../docs/requirements.md)；Service 接口 / 状态机 / 流程详见 [`docs/architecture.md`](../../docs/architecture.md)。
+> 完整设计文档（产品形态 / Service 接口 / 状态机 / 流程）见项目仓库 `docs/` 子目录：
+> - https://github.com/Fectivnfy112357/dsh-team-plugin/blob/main/docs/requirements.md
+> - https://github.com/Fectivnfy112357/dsh-team-plugin/blob/main/docs/architecture.md
+>
+> 本 skill **不**把 docs/ 装入插件运行时（`package.json#files` 只含运行所需），上面的 GitHub 链接是面向用户/agent 的纯文档参考。
 
 ## 调用流程
 
