@@ -1733,6 +1733,107 @@ try {
   const artList2 = await artSvc.list(planRun2Id);
   artList1.length === 1 && artList2.length === 1 ? ok('list per run returns correct counts') : bad('list shape wrong');
 
+  // ---- 17b. ArtifactRegistry: 2.0 #2 O(1) refCount index ----
+  console.log('\n[17b/19] ArtifactRegistry (2.0 #2 O(1) refCount index)');
+  artSvc._resetIndexForTests();
+  // Build a fresh cross-Run scenario: run A has artifact a-1; runs B/C/D
+  // each register a consumer that references a-1 in derived_from.
+  const idxAMeta = await ts.start({ taskDescription: 'idx-a', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+  const idxAId = idxAMeta.id;
+  await artSvc.register({
+    id: 'idx-a-1', run_id: idxAId, type: 'doc', file: 'sessions/m/artifacts/idx-a-1.md',
+    produced_by: 'm', member_id: 'm', derived_from: [],
+  });
+  // Three consumer runs, each with a derived_from pointing at a-1
+  for (let i = 0; i < 3; i++) {
+    const cmeta = await ts.start({ taskDescription: `idx-c-${i}`, flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+    await ts.markHolder(cmeta.id);
+    await artSvc.register({
+      id: `idx-c-${i}`, run_id: cmeta.id, type: 'doc', file: `sessions/m/artifacts/idx-c-${i}.md`,
+      produced_by: 'm', member_id: 'm', derived_from: [`${idxAId}/idx-a-1`],
+    });
+  }
+  // refCount with the canonical form: 3 distinct consumer artifacts
+  (await artSvc.refCount(`${idxAId}/idx-a-1`)) === 3
+    ? ok('refCount returns 3 for canonical cross-Run form (3 distinct consumers)')
+    : bad(`refCount canonical=${await artSvc.refCount(`${idxAId}/idx-a-1`)}`);
+  // canDelete: false (3 refs)
+  (await artSvc.canDelete(`${idxAId}/idx-a-1`)) === false
+    ? ok('canDelete=false when 3 cross-Run refs exist')
+    : bad('canDelete should be false');
+  // Register a 4th consumer that references a-1 in TWO ways (canonical + bare)
+  // -> should still count as 1 (intra-artifact dedup, matching v1.0 semantics)
+  const cmeta4 = await ts.start({ taskDescription: 'idx-c-4', flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+  await ts.markHolder(cmeta4.id);
+  await artSvc.register({
+    id: 'idx-c-4', run_id: cmeta4.id, type: 'doc', file: 'sessions/m/artifacts/idx-c-4.md',
+    produced_by: 'm', member_id: 'm',
+    derived_from: [`${idxAId}/idx-a-1`, 'idx-a-1'],  // both forms
+  });
+  (await artSvc.refCount(`${idxAId}/idx-a-1`)) === 4
+    ? ok('refCount handles cross-form refs in same artifact (still 1 per artifact)')
+    : bad(`refCount after dup-form=${await artSvc.refCount(`${idxAId}/idx-a-1`)}`);
+  // Idempotent re-register: same id, same derived_from -> refCount unchanged
+  const c0List = await ts.list();
+  const c0Id = c0List.find((r) => r.task_description === 'idx-c-0')?.id;
+  if (c0Id) {
+    await artSvc.register({
+      id: 'idx-c-0', run_id: c0Id, type: 'doc', file: 'sessions/m/artifacts/idx-c-0.md',
+      produced_by: 'm', member_id: 'm', derived_from: [`${idxAId}/idx-a-1`],
+    });
+    (await artSvc.refCount(`${idxAId}/idx-a-1`)) === 4
+      ? ok('refCount unchanged after idempotent re-register of an existing consumer')
+      : bad(`refCount after re-register=${await artSvc.refCount(`${idxAId}/idx-a-1`)}`);
+  }
+  // _resetIndexForTests: clear and the next refCount rebuilds from disk
+  artSvc._resetIndexForTests();
+  (await artSvc.refCount(`${idxAId}/idx-a-1`)) === 4
+    ? ok('_resetIndexForTests triggers a rebuild from disk; refCount is restored')
+    : bad(`refCount after reset=${await artSvc.refCount(`${idxAId}/idx-a-1`)}`);
+  // Unknown ref: refCount 0
+  (await artSvc.refCount('run-no-such/idx-no-such')) === 0
+    ? ok('refCount=0 for unknown ref')
+    : bad('refCount should be 0 for unknown ref');
+  artSvc._resetIndexForTests();
+
+  // ---- 17c. ArtifactRegistry: O(1) is actually fast (scaling sanity) ----
+  console.log('\n[17c/19] ArtifactRegistry (2.0 #2 scaling sanity)');
+  artSvc._resetIndexForTests();
+  // Create a moderate number of runs + consumers; refCount should be sub-ms.
+  const scalingRuns = 20;
+  const consumersPerRun = 5;
+  let scalingTarget = null;
+  for (let r = 0; r < scalingRuns; r++) {
+    const rmeta = await ts.start({ taskDescription: `scaling-${r}`, flow: 'handoff-round-table', flowConfig: {}, members: [{ member_id: 'm', instance_alias: 'm' }] });
+    await ts.markHolder(rmeta.id);
+    if (scalingTarget === null) {
+      // First run: register the target artifact
+      await artSvc.register({
+        id: `scaling-target`, run_id: rmeta.id, type: 'doc', file: 'sessions/m/artifacts/scaling-target.md',
+        produced_by: 'm', member_id: 'm', derived_from: [],
+      });
+      scalingTarget = `${rmeta.id}/scaling-target`;
+      continue;
+    }
+    for (let c = 0; c < consumersPerRun; c++) {
+      await artSvc.register({
+        id: `scaling-c-${r}-${c}`, run_id: rmeta.id, type: 'doc', file: `sessions/m/artifacts/scaling-c-${r}-${c}.md`,
+        produced_by: 'm', member_id: 'm', derived_from: [scalingTarget],
+      });
+    }
+  }
+  // Expected count: 19 runs * 5 consumers = 95 refs
+  const expectedRefs = (scalingRuns - 1) * consumersPerRun;
+  const startMs = Date.now();
+  const actualCount = await artSvc.refCount(scalingTarget);
+  const elapsedMs = Date.now() - startMs;
+  actualCount === expectedRefs
+    ? ok(`refCount scales correctly: ${actualCount} refs (expected ${expectedRefs})`)
+    : bad(`refCount=${actualCount} expected=${expectedRefs}`);
+  elapsedMs < 50
+    ? ok(`refCount is fast: ${elapsedMs}ms (under 50ms threshold for ${expectedRefs} refs)`)
+    : bad(`refCount slow: ${elapsedMs}ms`);
+
   // ---- 18. Adapter registry: 3 closed + unknown throws ----
   console.log('\n[18/19] Adapter registry');
   const { listAdapterIds, getAdapter } = await importService('services/adapters.js');

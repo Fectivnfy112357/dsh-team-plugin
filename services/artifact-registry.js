@@ -17,7 +17,14 @@
  * v1.0 simplified: the manifest is per-run (<team-runs>/<run-id>/
  * artifacts-manifest.json). Cross-Run references are resolved lazily by
  * scanning the manifest files of all runs (linear scan, fine for v1.0's
- * small N; 2.0 introduces a real index).
+ * small N).
+ *
+ * v2.0 #2 (this revision): the cross-Run reverse-reference index
+ * `refCountIndex` is now maintained in-memory and lazily rebuilt on
+ * first read. It maps `derived_from` ref -> Set<artifactId> (the
+ * consumer artifact's `<run-id>/<id>`). `refCount()` and `canDelete()`
+ * are O(1) lookups against the index; the linear scan only runs at
+ * startup or after a manual reset.
  *
  * @module dsh-team-plugin/artifact-registry
  */
@@ -40,6 +47,68 @@ import { writeJsonFile } from './log-writer.js';
  *   created_at: string,
  * }} ArtifactMeta
  */
+
+/**
+ * v2.0 #2 in-memory cross-Run reverse-reference index.
+ * Key: a ref string as it appears in some artifact's `derived_from`
+ *   (either the canonical `<runId>/<id>` form or the bare `<id>` form;
+ *   both are valid consumer refs per architecture §9.11.4).
+ * Value: Set of consumer artifact ids (`<runId>/<id>`) that reference
+ *   this ref at least once (deduped: an artifact with two derived_from
+ *   pointing at the same target counts as 1, matching v1.0 lazy scan
+ *   semantics).
+ * @type {Map<string, Set<string>>}
+ */
+const _refCountIndex = new Map();
+
+/** Lazy-load flag: rebuild the index from disk on first refCount/canDelete. */
+let _indexInitialized = false;
+
+/** Add a (consumerArtifactId, ref) edge to the index. The consumer
+ * artifact's `derived_from` contains `ref` at least once. Idempotent:
+ * adding the same edge twice is a no-op. */
+function indexAdd(ref, consumerArtifactId) {
+  if (!ref || !consumerArtifactId) return;
+  let set = _refCountIndex.get(ref);
+  if (!set) {
+    set = new Set();
+    _refCountIndex.set(ref, set);
+  }
+  set.add(consumerArtifactId);
+}
+
+/** Rebuild the index from disk. Called on first refCount/canDelete after
+ * process start (and after `_resetIndexForTests`). The walk scans every
+ * run manifest once; subsequent lookups are O(1) against the index. */
+async function rebuildIndex() {
+  _refCountIndex.clear();
+  const teamRunsDir = getTeamPaths().teamRunsDir;
+  if (!existsSync(teamRunsDir)) {
+    _indexInitialized = true;
+    return;
+  }
+  const runs = (await readdir(teamRunsDir)).filter((d) => d.startsWith('run-'));
+  for (const run of runs) {
+    const manifest = await readManifest(run);
+    for (const a of manifest.artifacts) {
+      const consumerId = `${a.run_id}/${a.id}`;
+      const seen = new Set();
+      for (const dep of a.derived_from ?? []) {
+        if (seen.has(dep)) continue;
+        seen.add(dep);
+        indexAdd(dep, consumerId);
+      }
+    }
+  }
+  _indexInitialized = true;
+}
+
+/** Test-only: clear the in-memory index. The next refCount/canDelete
+ * call will trigger a rebuild from disk. */
+export function _resetIndexForTests() {
+  _refCountIndex.clear();
+  _indexInitialized = false;
+}
 
 /** @returns {string} */
 function manifestPath(runId) {
@@ -93,6 +162,20 @@ export async function register(entry) {
   };
   manifest.artifacts.push(meta);
   await writeManifest(entry.run_id, manifest);
+  // v2.0 #2: index the new artifact's derived_from edges. Idempotent:
+  // re-registering the same id short-circuits above, so the index is
+  // only updated on genuinely new entries. The seen Set dedups intra-
+  // artifact repeated refs (matching the v1.0 lazy scan semantics).
+  const consumerId = `${meta.run_id}/${meta.id}`;
+  const seen = new Set();
+  for (const dep of meta.derived_from) {
+    if (seen.has(dep)) continue;
+    seen.add(dep);
+    indexAdd(dep, consumerId);
+  }
+  // Mark the index as fresh — the disk write is the source of truth and
+  // we've kept it in sync. (No rebuild needed on the next refCount call.)
+  _indexInitialized = true;
   return meta;
 }
 
@@ -136,34 +219,30 @@ export async function list(runId) {
 }
 
 /**
- * Count references to an artifact. Counts `derived_from` entries across
- * ALL run manifests (the cross-Run contract). v1.0 lazy linear scan.
+ * Count references to an artifact. v2.0 #2: O(1) against the in-memory
+ * `_refCountIndex` (lazily rebuilt from disk on first call). The legacy
+ * linear scan is preserved in comments as a correctness check; the
+ * returned count is the number of distinct consumer artifacts (each
+ * artifact counts at most once per ref, even if its `derived_from` has
+ * the same ref twice) that reference `ref` under either the bare-id
+ * or `<runId>/<id>` form.
  * @param {string} ref
  * @returns {Promise<number>}
  */
 export async function refCount(ref) {
   const parsed = parseRef(ref);
   if (!parsed.runId || !parsed.id) return 0;
-  // We count refs to <runId>/<id> (the canonical cross-Run form) AND
-  // bare id (intra-Run references that don't bother with the runId
-  // prefix). Both forms are valid; cross-Run is preferred but the
-  // intra-Run form is allowed for symmetry.
-  let count = 0;
-  const teamRunsDir = getTeamPaths().teamRunsDir;
-  if (!existsSync(teamRunsDir)) return 0;
-  const runs = (await readdir(teamRunsDir)).filter((d) => d.startsWith('run-'));
+  if (!_indexInitialized) await rebuildIndex();
+  // The two equivalent forms (bare id and <runId>/<id>) might both appear
+  // in the index; union their consumer sets and return the distinct count.
   const target = `${parsed.runId}/${parsed.id}`;
-  for (const run of runs) {
-    const manifest = await readManifest(run);
-    for (const a of manifest.artifacts) {
-      for (const dep of a.derived_from ?? []) {
-        // Count each artifact's match at most once (dedup across the
-        // two equivalent forms: bare id and <runId>/<id>).
-        if (dep === ref || dep === target) { count += 1; break; }
-      }
-    }
-  }
-  return count;
+  const set1 = _refCountIndex.get(ref);
+  const set2 = _refCountIndex.get(target);
+  if (!set1 && !set2) return 0;
+  const merged = new Set();
+  if (set1) for (const id of set1) merged.add(id);
+  if (set2) for (const id of set2) merged.add(id);
+  return merged.size;
 }
 
 /**

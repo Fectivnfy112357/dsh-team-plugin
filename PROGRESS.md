@@ -31,10 +31,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #4 | (待 commit) | pipeline-with-feedback 跨步 `context_refs` 自动传播:`runPipeline` 维护 `stepOutputs[i] = { produced_artifact_ids }` in-memory map,派下一步时按优先级 (1) `step.context_refs` (2) `flow_config.context_refs_override[i]` (3) 派生自 `stepOutputs[i-1]` 三层 fallback;feedback retry 路径取最终 attempt 的产物;smoke-test [12b/19] 加 8 个新 check (auto-derive / step override / flow override / feedback retry / 隔离 / reset);导出 `_resetStepOutputsForTests(runId)` | `node scripts/verify.mjs` 5 层绿 · smoke-test 146 → 154 checks |
 | 2.0 #1 留口 (rewiring) | (待 commit) | 三个 flow (pipeline / round-table / fan-out) 替换 `dispatchLog` 占位为 `MemberService.dispatch`:`dispatchTask(ctx, runId, memberId, opts)` helper —— 有 `ctx.subagents.followup` 走 `MemberService.dispatch` (写 dispatch-log + followup + auto-join),否则回退到 v1.0 `dispatchLog` 纯日志路径;`lib/index.js` 在 tool 注册时闭包 `ctx` 到 `args.__dshCtx`,`team.start.execute` 读它并透传给 `flowSvc.run`;`team.start` 补 `pending → assembling` 转换;唯一写入者承诺 / 4 worker 上限 / degraded flag / max_rounds 全部保留;smoke-test [12c/19] / [12d/19] / [12e/19] / [12f/19] 加 22 个新 check (pipeline auto-join + followup + 跨步 context_refs 透传 / round-table dispatchTask fallback / fan-out 平行 + aggregator 含 context_refs / team.start → flowSvc.run → dispatchTask → MemberService.dispatch 端到端) | `node scripts/verify.mjs` 5 层绿 · smoke-test 154 → 176 checks |
 | P1 #6 team.resume | (待 commit) | `team.resume` 工具落地:读 meta → 校验 `interrupted → assembling` ALLOWED 边 → 重 join 成员 (`MemberService.joinRun`,idempotent) → 重启 flow engine;`__dshCtx` 透传 production 路径走 `MemberService.dispatch` followup,无 ctx 走 v1.0 `dispatchLog` fallback;terminated member 走 best-effort rollback(状态机 `assembling → interrupted` 不在 ALLOWED 表里,直接 append state-history + 改 meta.json);与 `team.rerun` 语义切分保持(同 run 回滚 vs 配置克隆);smoke-test [20/19] 加 14 个新 check (not-found / non-interrupted 拒绝 / 端到端 mock ctx re-join + flow 重启 / state-history edge / session-state running / dispatch-log member-join / 无 ctx fallback) | `node scripts/verify.mjs` 5 层绿 · smoke-test 176 → 190 checks |
+| 2.0 #2 | (待 commit) | artifact O(1) 反向引用索引 `_refCountIndex: Map<ref, Set<consumerArtifactId>>`:`register()` 时按 derived_from 逐 dep 加边(intra-artifact dedup);`refCount()` 改 O(1) 索引查(两个等价形式 `<runId>/<id>` 和 bare `<id>` 取并集);`canDelete()` 复用;`rebuildIndex()` 首次 refCount 调用时从磁盘懒加载(在已有 manifest 累积时);`_resetIndexForTests` 清空+重载。语义兼容 v1.0 线性扫(每 artifact 最多计 1 次,即使 derived_from 含重复 dep)。smoke-test [17b/19] + [17c/19] 加 8 个新 check (3 consumers / cross-form dedup / idempotent re-register / reset rebuild / unknown ref / 95 refs < 50ms 缩放) | `node scripts/verify.mjs` 5 层绿 · smoke-test 190 → 198 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 190 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 198 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -49,7 +50,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume）
+- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -85,11 +86,12 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **Why deferred**: v1.0 `artifact-registry.js#refCount` 是 lazy 线性扫描。Run 多了会变慢（O(n) 每次 refCount 查询）。
 
-**目标形态**:
-- 维护 `refCountIndex: Map<artifactId, Set<runIds>>`
-- `register()` 时更新索引
-- `refCount(id)` 走 O(1) 索引查询
-- 跨 Run `canDelete(id)` 走索引 + 引用 Run 集合
+**已完成** (本轮):
+- ✅ 维护 `_refCountIndex: Map<ref, Set<consumerArtifactId>>`,in-memory
+- ✅ `register()` 走 `indexAdd` 加边,intra-artifact dedup 维持 v1.0 线性扫语义
+- ✅ `refCount()` 改 O(1) 索引查;两个等价形式 (`<runId>/<id>` + bare `<id>`) 集合并集
+- ✅ `rebuildIndex()` 首次 `refCount` 调用时从磁盘懒加载;`_resetIndexForTests()` 暴露给测试 + cold-start 路径
+- ✅ smoke-test [17b/19] + [17c/19] 加 8 个新 check (3 consumers / cross-form dedup / idempotent re-register / reset rebuild / unknown ref / 95 refs < 50ms 缩放)
 
 **依赖**: 无（独立优化）
 
@@ -196,7 +198,7 @@ P1.5-b 实时 DP 订阅             ✅ commit d478fdd
 2.0 #5 reconcileOnBoot per-dispatch mark ✅ commit aedbd10 (审阅收口 #1)
 2.0 #6 重跑 interrupted 语义      ✅ 拍板 (commit aedbd10)  team.resume 留口
 2.0 #4 pipeline context_refs    ✅ (本轮 commit)
-2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
+2.0 #2 跨 Run artifact 索引     ✅ (本轮 commit)
 ```
 
 每一项完工动作: 代码 → smoke test → `node scripts/verify.mjs` → commit → push → 回到本文件更新 §1/§2。
