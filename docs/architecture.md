@@ -473,7 +473,7 @@ interface DecisionPointService {
 
 **等待机制**（`§9.10.4`）：
 
-- 两级 `wait_minutes`：全局默认 10 分钟（OQ-2 待拍是否写入产品默认）+ `flow_config.decision_points[i].wait_minutes` 单点 override
+- 两级 `wait_minutes`：全局默认 **10 分钟**（OQ-2 closed: 写入产品默认值，`services/decision-point-service.js:85` `DEFAULT_WAIT_MINUTES = 10`）+ `flow_config.decision_points[i].wait_minutes` 单点 override
 - 窗口内多次介入：DSH 取**最后一条 action** 为准；`feedback` 不合并（保留"改主意"）
 - 窗口外迟到消息无决策点归属，但 DSH 调度时可见
 
@@ -532,7 +532,7 @@ interface PlanService {
 
 **与 DSH handoff 协同**（`§9.9.7`）：handoff 文档模板加"最近 active plan: `<id> <path>`"，仅引用未执行完的 plan。
 
-**intent 枚举**（`§11.4 OQ-1`）：倾向 `produce | review | collect | synthesize | decide`——实现时预留枚举扩展点，用户拍板后填具体值。
+**intent 枚举**（`§11.4 OQ-1` closed `aedbd10`）：**`produce | review | collect | synthesize | decide`**——5 值已写进 `lib/tools/team-tools.js:449` schema + `services/plan-service.js` 校验 + smoke-test [16/19] 验过。
 
 ### 4.7 三个 Flow 的核心循环
 
@@ -722,7 +722,7 @@ state = running
 - **位置**：Team Run 实例下，`sessions/<member-id>/artifacts/<artifact-id>.<ext>`；`plan` 类型例外：在 Team Run 顶层（`team-runs/<run-id>/plans/`）
 - **元数据**：`artifacts/<id>.meta.json`（与文件同目录，便于按目录扫描），记录 `produced_by` / `produced_in_dispatch` / `produced_in_session` / `derived_from` / `type` / `created_at`
 - **不可变快照**：重跑 → 新 id；原文件保留；同源链 `derived_from`
-- **跨 Run 引用**：id 带 run 归属段 `<run-id>/<artifact-id>`（具体编码格式 OQ-3，DSH 实现层定），**引用式不复制**
+- **跨 Run 引用**：id 带 run 归属段 **`<run-id>/<artifact-id>`**（OQ-3 closed `750f837`：canonical 形式 + 裸 `<id>` 兼容，仅作 intra-Run 旧引用），**引用式不复制**
 - **删除保护**：`derived_from` 计数 + 跨 Run 反向引用计数，被引用 = 拒绝（`§9.11.3`）
 
 ### 5.6 引用锁 / 快照
@@ -926,7 +926,7 @@ DSH Team Service 在以下位置尊重此约束：
 - 进入条件：用户显式触发，任意非终态（含 `pending` / `assembling` / `running` / `interrupted`）
 - 进入动作：DSH 立即停止派发新 dispatch + 中断当前在跑 dispatch（标记 `terminal=interrupted`）；已完成 dispatch 产物保留
 - **进程层被杀** = DSH 进程死亡（桌面客户端退出 / 崩溃）→ 归 `interrupted`，**不**归 `aborted`（D1-5 第六轮收口）；语义不可混淆
-- `state-history` 必含 `aborted` 转换的 reason（形式待定，`§11.4 OQ-4`）
+- `state-history` 必含 `aborted` 转换的 reason（OQ-4 closed `750f837`：**`from_state` / `to_state` / `reason` / `timestamp`** 4 字段全 `services/team-service.js:153` 实写）
 
 ---
 
@@ -1034,13 +1034,13 @@ Run 终态
 | acp 协议 context length 暴露不一致 | 各 adapter（hermes / mcode / claude-agent-acp）实现差异；200k 阈值检测在 subagent-acp 层需做 adapter-specific 适配 |
 | DSH handoff 期间 Run 长时间无调度者 | 成员 session 保活但无推进；UI 可加"无推进"暗示（`§4.4` 留 UI backlog）|
 
-### 11.2 开放问题（继承 `requirements.md §11.4`）
+### 11.2 开放问题（继承 `requirements.md §11.4`；2026-08-20 全部 closed）
 
-- **OQ-1**：plan step intent 枚举值集（倾向 `produce | review | collect | synthesize | decide`，待拍）
-- **OQ-2**：决策点等待默认 10 分钟是否写入产品默认值（倾向是）
-- **OQ-3**：跨 Run artifact id 内 run 归属段编码格式（机制层锁定，具体格式 DSH 实现定）
-- **OQ-4**：state-history 必含字段的准确措辞（用户落文档时定）
-- **OQ-5**：`requirements.md §4` 重写的终稿措辞审校（第七轮已按收口清单对齐，待最终审）
+- ✅ **OQ-1**：plan step intent 枚举值集 —— **`produce | review | collect | synthesize | decide`**（closed `aedbd10`）
+- ✅ **OQ-2**：决策点等待默认 10 分钟 —— **写入产品默认值**（closed `750f837`，`DEFAULT_WAIT_MINUTES = 10`）
+- ✅ **OQ-3**：跨 Run artifact id 内 run 归属段编码格式 —— **`<run-id>/<artifact-id>`**（closed `750f837`，canonical + 裸 `<id>` 兼容）
+- ✅ **OQ-4**：state-history 必含字段的准确措辞 —— **`from_state` / `to_state` / `reason` / `timestamp`**（closed `750f837`）
+- ✅ **OQ-5**：`requirements.md §4` 重写的终稿措辞审校 —— **第七轮收口清单对齐**（closed `750f837`）
 
 ### 11.3 后续讨论议题（`requirements.md §11.2 / §11.3` 留口）
 

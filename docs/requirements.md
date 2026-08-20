@@ -1348,13 +1348,13 @@ DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mo
 - 决策点角标的具体颜色 / 动效
 - A2A 消息在不同 flow 下的密度渲染策略细节
 
-### 11.4 Open Questions（用户尚未拍板）
+### 11.4 Open Questions（2026-08-20 全部 closed）
 
-- **plan step intent 枚举值集**（§9.9.3）：倾向 `produce/review/collect/synthesize/decide`——任务域动词最终值待拍（第六轮收口未触及，仍开放）
-- **决策点等待默认 10 分钟**（§9.10.4）：是否写入产品默认值——倾向是（第六轮收口未触及，仍开放）
-- **跨 Run 引用 artifact id 内 run 归属段的编码格式**（§9.11.1）：机制层已锁定（id 带 run 段），具体格式 DSH 实现层定
-- **state-history 必含字段的准确措辞**：用户落文档时定（第六轮已定 interrupted 记录样例，§5.2）
-- **§4 重写的准确措辞**：第六轮已按收口清单对齐 §4 与 §9.10 引用，终稿措辞仍待用户审校
+- ✅ **plan step intent 枚举值集**（§9.9.3 / commit `aedbd10`）：**`produce | review | collect | synthesize | decide`**——5 值已写进 `lib/tools/team-tools.js:449` schema + `services/plan-service.js` 校验 + smoke-test [16/19] 验过 `produce` / `review`；用户签字
+- ✅ **决策点等待默认 10 分钟**（§9.10.4 / commit `750f837`）：**写入产品默认值**——`services/decision-point-service.js:85` 写死 `DEFAULT_WAIT_MINUTES = 10`，`open()` 默认取它；用户签字
+- ✅ **跨 Run 引用 artifact id 内 run 归属段编码格式**（§9.11.1 / commit `750f837`）：**`<run-id>/<artifact-id>`**——canonical 形式 + 裸 `<id>` 兼容（仅作 intra-Run 旧引用），已在 `services/artifact-registry.js` 实现；用户签字
+- ✅ **state-history 必含字段的准确措辞**（§5.2 / commit `750f837`）：**`from_state` / `to_state` / `reason` / `timestamp`**——4 字段全 `services/team-service.js:153` 实写；用户签字
+- ✅ **§4 重写的准确措辞**（第七轮收口 / commit `750f837`）：**第七轮收口清单对齐 §4 与 §9.10 引用**——现 §4 即终稿；用户签字
 
 ---
 
@@ -1589,11 +1589,12 @@ DSH Team 常驻面板采用 **Linear 风 app shell** 结构，骨架已通过 mo
 - **产品场景 vs 机制推导**：场景 A/B/C 全部已被现有机制覆盖（reviewer/analysis/DSH 检验）；只有"真实用户声音"或"合规审计需求"出现时才重开
 - **架构借鉴的不变量**：v1 第四轮"借鉴但未采纳"清单里的差异（外部 ACP 进程 vs 内部 session）持续生效——很多 orchestra-dsh 概念不能直接迁移
 
-### 17.5 第五轮未拍板项（Open Questions）
+### 17.5 第五轮未拍板项（2026-08-20 全部 closed — 详见 §11.4）
 
-- plan step intent 枚举值集（§9.9.3 / §11.4）
-- 决策点等待默认 10 分钟是否写入产品默认值（§9.10.4 / §11.4）
-- 跨 Run 引用 artifact id 内 run 归属段编码格式（§9.11.1 / §11.4，DSH 实现层定）
+历史清单（已 close，2026-08-20 全部签字）：
+- ~~plan step intent 枚举值集~~（§9.9.3 / §11.4）—— closed by `aedbd10`
+- ~~决策点等待默认 10 分钟是否写入产品默认值~~（§9.10.4 / §11.4）—— closed by `750f837`
+- ~~跨 Run 引用 artifact id 内 run 归属段编码格式~~（§9.11.1 / §11.4）—— closed by `750f837`
 
 ### 17.6 read_only 重开判定（D8-1）
 

@@ -35,6 +35,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | P2 抛光 — A2A payload 上限 | (待 commit) | `message-service.js` 加 `A2A_PAYLOAD_MAX_BYTES = 1 MiB`(架构 §9.4 没硬定,1 MiB 是经验值:`a2a-message-log.jsonl` 单条 append 阻塞风险 + 对齐常见 ACP message 单条上限);`send` 入口按 `JSON.stringify(payload)` 长度校验;超限抛 `MessagePayloadTooLargeError`(可单独 catch,避免 pattern-match 错误字符串);失败时**不**写 a2a-log 也**不**碰 inbox(fail-fast);smoke-test [6b/19] 加 7 个新 check (1KB 接受 / 边界接受 / 超限抛 / 错误信息含 cap / 不漏到 a2a-log / 不碰 inbox / 常量值) | `node scripts/verify.mjs` 5 层绿 · smoke-test 198 → 206 checks |
 | P2 抛光 — cross-Run 引用硬删兜底 | (待 commit) | `team.delete_artifact` 工具落地:走 `canDelete` 引用检查,refcount>0 拒绝(`deleted: false` + `refCountAtDelete`);refcount=0 时改 manifest + unlink 文件 + 失效反向索引(`_resetIndexForTests`);**没有** `force: true` 覆盖(单写入者承诺 + 防止"绕过 ref guard 误删");审计行(state-history)同时记录拒绝和成功(`kind: 'artifact-delete-attempt'`, `outcome: 'refused' \| 'deleted'`);smoke-test [17d/19] 加 11 个新 check (refused 不漏写 / audit trail / ref 删后 canDelete 变 true / 删除成功改 manifest / unlink 文件 / resolve undefined / refCount 0 / ghost 防御 / 缺 runId 抛) | `node scripts/verify.mjs` 5 层绿 · smoke-test 206 → 221 checks |
 | P2 抛光 — §10 视觉 backlog 评估 | (待 commit) | 视觉 backlog 评估:配色/字体/圆角/间距/决策点角标颜色/A2A 消息密度 6 项均归 DSH host UI 侧(architecture §10 视觉子节明确归属 DSH),`ui/_react.js` 沙箱不持有实际样式;**不**在插件层实现,等真实用户声音 / DSH host 集成触发后由 DSH 端承担。本仓维持 `ui/team-*.js` React.createElement 最小骨架 + 已有 sentinel `data-*` 属性,等 host 端做最终样式 | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks |
+| 5 OQ 全部 close (措辞签字) | (待 commit) | 2026-08-20 用户一次性签字 OQ-2/3/4/5 (按推荐项);`docs/requirements.md §11.4` / `docs/architecture.md §11.2` / `docs/requirements.md §17.5` 措辞收口,OQ-1 在 `aedbd10` 实质闭环;5 OQ 全部 closed,实现层与文档措辞一致 | `node scripts/verify.mjs` 5 层绿 · smoke-test 仍 221 checks (文档-only) |
 
 ### 1.1 验证
 
@@ -53,7 +54,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引 + P2 抛光 A2A payload + P2 抛光 硬删兜底 + P2 抛光 §10 视觉评估）
+- 22 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引 + P2 抛光 A2A payload + P2 抛光 硬删兜底 + P2 抛光 §10 视觉评估 + 5 OQ close 措辞签字）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -168,15 +169,15 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 | OQ | 倾向值（已写进实现）| 拍板状态 |
 |---|---|---|
-| OQ-1 plan step intent 枚举值集 | `produce \| review \| collect \| synthesize \| decide` | **closed (commit `aedbd10`)** — 5 值已写进 `lib/tools/team-tools.js:449` schema + `services/plan-service.js` 校验 + smoke-test [16/19] 验过 `produce` / `review`;实现层已锁定,只待用户在 `requirements.md §11.4` 措辞最终签字 |
-| OQ-2 决策点等待默认 10 分钟 | 是（写进产品默认值）| open（实现层: `services/decision-point-service.js:85` 写死 `DEFAULT_WAIT_MINUTES = 10`,`open()` 默认取它;**实质已落,等措辞签字**）|
-| OQ-3 跨 Run artifact id 内 run 归属段编码格式 | 实现层定（已用 `<run-id>/<artifact-id>`）| open |
-| OQ-4 state-history 必含字段的准确措辞 | 实现已落，措辞用户审 | open |
-| OQ-5 `requirements.md §4` 重写终稿措辞 | 第七轮已对齐收口清单，待最终审 | open |
+| OQ-1 plan step intent 枚举值集 | `produce \| review \| collect \| synthesize \| decide` | **closed (commit `aedbd10`)** — 5 值已写进 `lib/tools/team-tools.js:449` schema + `services/plan-service.js` 校验 + smoke-test [16/19] 验过 `produce` / `review`;2026-08-20 用户签字 |
+| OQ-2 决策点等待默认 10 分钟 | 是（写进产品默认值）| **closed (commit `750f837`)** — 2026-08-20 用户签字;`services/decision-point-service.js:85` 写死 `DEFAULT_WAIT_MINUTES = 10`,`open()` 默认取它 |
+| OQ-3 跨 Run artifact id 内 run 归属段编码格式 | `<run-id>/<artifact-id>` (canonical) + 裸 `<id>` 兼容 (intra-Run) | **closed (commit `750f837`)** — 2026-08-20 用户签字 |
+| OQ-4 state-history 必含字段的准确措辞 | `from_state` / `to_state` / `reason` / `timestamp` | **closed (commit `750f837`)** — 2026-08-20 用户签字;`services/team-service.js:153` 实写 |
+| OQ-5 `requirements.md §4` 重写终稿措辞 | 第七轮收口清单（`docs/discussion-log.md` 末段）已对齐 | **closed (commit `750f837`)** — 2026-08-20 用户签字 |
 | 2.0 #1 parent resolution | `parent = exec.agent` (option A) + adapter 由 cordis.patch.yml 三 entry 声明 | **closed (commit `530af83`)** |
 | 2.0 #6 重跑 interrupted 语义 | `team.resume`(同 run 状态回滚) + `team.rerun`(配置克隆) 分清 | **closed (commit `aedbd10`)** — 文档入 `architecture.md §6.3` |
 
-**含义**: 5 OQ 中 OQ-1 实质已落(实现锁 5 个值),OQ-2 实质已落(`DEFAULT_WAIT_MINUTES = 10` 在 `services/decision-point-service.js:85`);后 3 条 (OQ-3/4/5) 仍 open,等措辞签字,不阻塞 2.0 开发。
+**含义**: 5 OQ + 2 条 2.0 拍板记录 (parent resolution + 重跑 interrupted 语义) 全部 closed。2026-08-20 用户一次性签字 OQ-2/3/4/5（按推荐项），OQ-1 在 commit `aedbd10` 已实质闭环。措辞已写入 `docs/requirements.md §11.4` / `docs/architecture.md §11.2`，§4 即终稿。
 
 ---
 
