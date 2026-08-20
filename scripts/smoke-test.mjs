@@ -140,12 +140,59 @@ try {
   const runId2 = orphanMeta.id;
   await writeJsonFile(join(paths.teamRunsDir, runId2, 'holder.pid'), '999999');
   await ts.transition(runId2, 'pending', 'assembling', 'formed');
+  // Pre-populate dispatch-log with one issued-but-not-terminal row (simulates
+  // a dispatch that was in flight when the DSH process died) and one
+  // already-terminal row (must NOT be re-marked).
+  const dispatchSvc = await importService('services/dispatch-service.js');
+  const inFlight = await dispatchSvc.dispatch({
+    run_id: runId2,
+    to: 'm1',
+    task: 'in-flight at DSH death',
+    context_refs: [],
+    seq: 1,
+  });
+  const done = await dispatchSvc.dispatch({
+    run_id: runId2,
+    to: 'm1',
+    task: 'completed before DSH death',
+    context_refs: [],
+    seq: 2,
+  });
+  await dispatchSvc.markTerminal(runId2, done.id, 'completed', {
+    produced_artifact_ids: ['art-1'],
+  });
   const r = await ts.reconcileOnBoot();
   r.interrupted.includes(runId2) ? ok(`reconcileOnBoot marked ${runId2} as interrupted`) : bad(`expected ${runId2} in ${JSON.stringify(r.interrupted)}`);
   const reloadedOrphan = await ts.readMeta(runId2);
   reloadedOrphan?.state === 'interrupted'
     ? ok('orphan run is now state=interrupted')
     : bad(`orphan run state = ${reloadedOrphan?.state}`);
+  // Per-dispatch mark: the in-flight dispatch must now have a terminal line
+  // with terminal=interrupted + reason=process-killed; the already-terminal
+  // dispatch must be left alone (its terminal line is the latest, not ours).
+  const dl = readFileSync(join(paths.teamRunsDir, runId2, 'dispatch-log.jsonl'), 'utf-8')
+    .trim().split('\n').map((l) => JSON.parse(l));
+  // group by id; keep only the last row per id (terminal marker is always
+  // appended after the issue row, so the latest line wins)
+  /** @type {Record<string, any>} */
+  const lastById = {};
+  for (const row of dl) lastById[row.id] = row;
+  lastById[inFlight.id]?.terminal === 'interrupted'
+    ? ok('in-flight dispatch is now terminal=interrupted')
+    : bad(`in-flight dispatch latest = ${JSON.stringify(lastById[inFlight.id])}`);
+  lastById[inFlight.id]?.reason === 'process-killed'
+    ? ok('in-flight dispatch terminal reason=process-killed')
+    : bad(`in-flight dispatch reason = ${lastById[inFlight.id]?.reason}`);
+  // existing completed dispatch must not have been re-marked
+  lastById[done.id]?.terminal === 'completed'
+    ? ok('already-completed dispatch is left alone (not re-marked)')
+    : bad(`completed dispatch latest = ${JSON.stringify(lastById[done.id])}`);
+  // the issue row for the in-flight dispatch must also still be present
+  // (we appended a new line, we did not mutate the original)
+  const issueRow = dl.find((r) => r.id === inFlight.id && r.task === inFlight.task);
+  issueRow && !issueRow.terminal
+    ? ok('original issue row preserved (append-only, not mutated)')
+    : bad(`issue row missing or already has terminal: ${JSON.stringify(issueRow)}`);
 
   // ---- 5. DecisionPointService ----
   console.log('\n[5/19] DecisionPointService');

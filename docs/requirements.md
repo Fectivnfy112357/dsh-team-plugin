@@ -439,7 +439,8 @@ DSH 调度者 session **由用户在 DSH UI 手动切换**：
 
 ### 4.3 用户介入的持久化（第五轮 D5-4）
 
-- 独立 `user-intervention-log.jsonl`（每行：`{id, decision_point_id, user_message, action, timestamp}`）
+- 独立 `user-intervention-log.jsonl`（每行：`{id, decision_point_id, user_message, action, is_ad_hoc, timestamp}`）
+- `is_ad_hoc` 标识此响应是否来自用户主动拉的 ad-hoc 门（§9.10.2）——审计/回查分清「用户主动插话」与「flow 点名参与」
 - 不混 a2a-message-log（保留 Member 语义）；不塞 dispatch context_refs（用户反馈不是 artifact）
 - 注入 = DSH 处理时把 feedback 写进下一轮 dispatch 的 task 文本
 
@@ -599,6 +600,21 @@ DSH 侧实现时的逻辑结构如下。**具体存储引擎（YAML/JSON/SQLite�
   "timestamp": "<iso8601>"
 }
 ```
+
+**`user-intervention-log.jsonl`**（每行一条用户介入）：
+
+```json
+{
+  "id": "<msg-id>",
+  "decision_point_id": "<dp-id>",
+  "user_message": "<text>",
+  "action": "continue|complete|abort",
+  "is_ad_hoc": false,
+  "timestamp": "<iso8601>"
+}
+```
+
+`is_ad_hoc` 标识此响应是否来自用户主动拉的 ad-hoc 门（§9.10.2 第七轮拍板 1）——审计/回查时一眼分清「用户主动插话」与「flow 点名参与」。同构的 DP 响应模型 + 持久化扩展字段（见 architecture.md §4.5）。
 
 ### 5.3 存储策略说明
 
@@ -949,6 +965,10 @@ DSH 调度者 session **由用户手动控制**——因为 DSH 是用户在前�
 - "DSH 主动暂停"不存在触发场景——DSH handoff 是用户触发的纯手动动作
 - 现有的"DSH 不在 → 停摆 → 重连"链路自然覆盖了所有"暂停-恢复"需求（第六轮收口确认：文档全量清理 pause 残留，仅本论证与 §8 Q2 决策记录保留）
 
+**"重连"用语收口**（2026-08-20 审阅发现）：
+
+§9.7 第 944 行写"重连所有 Member session"——本节内的"重连"是**DSH 端重新建立对 Member 状态的认知**（按需重读 `session-state.json` + `dispatch-log` + `meta.json`），**不是**真重连 ACP 会话。ACP 会话在 DSH 进程活着的整个生命周期都保持存活，handoff-hermes 走的是 DSH session 切换（同进程内纯 UI 动作），不需要"重连"。**真重连**只在 §9.6 的 DSH 进程死亡场景讨论——而那一支 §6.3 明确"重连不可能"（adapter 内存中的 session 不能跨进程复活）。两词在不同小节含义不同，2.0 实施时勿混。
+
 ### 9.8 失败处理（第五轮 Q1-Q6 全部拍板，2026-08-19）
 
 **§9.8 覆盖了原先 §9.8 占位 + 第二轮失败处理相关讨论的所有留白。**
@@ -1130,7 +1150,8 @@ decision_point_response = {
 
 #### 9.10.3 决策点持久化（Q20 / D5-4）
 
-- **独立 `user-intervention-log.jsonl`**（每行：`{id, decision_point_id, user_message, action, timestamp}`）
+- **独立 `user-intervention-log.jsonl`**（每行：`{id, decision_point_id, user_message, action, is_ad_hoc, timestamp}`）
+- `is_ad_hoc` 字段同 §4.3 —— 第七轮拍板 1 落地（v1.0 实施时已落进代码 + smoke test）
 - **不混 a2a-message-log**（保留 Member 语义；`from` 字段不需要 user 枚举）
 - **不塞 dispatch context_refs**（用户反馈不是 artifact）
 - **注入机制**：DSH 处理决策点响应时，把 `feedback` 写进下一轮 dispatch 的 `task` 文本

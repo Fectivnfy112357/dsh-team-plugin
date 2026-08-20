@@ -783,6 +783,17 @@ state = running
 - `interrupted` → 用户放弃 → `aborted`
 - **不**自动恢复、不收养孤儿进程（DSH 死=成员进程一并销毁，ACP session 在 adapter 内存中，重连不可能；产物保留在 run 目录可回看）
 
+**重跑两个动作的语义切分**（2026-08-20 审阅收口）：
+
+interrupted 上的"重跑"按钮触发哪个动作？两个候选语义不同，必须分清：
+
+| 动作 | tool 名 | run-id | 状态转换 | 用途 |
+|---|---|---|---|---|
+| **同 run 状态回滚** | `team.resume`（v1.0 留口，未实现）| **同** run-id | `interrupted → assembling` | "DSH 崩了，我想接着这个 run 继续做"——保留历史日志、产物、state-history（中间插一条 `interrupted → assembling`），成员按当前 `meta.json.members` 重新 join |
+| **配置克隆** | `team.rerun`（v1.0 已实现，`lib/tools/team-tools.js:547`）| **新** run-id | n/a | "我想用同样的 task/flow/members 跑一次新的"——`teamService.start()` 拿新 id |
+
+状态机 ALLOWED 转换 `interrupted: new Set(['assembling', 'aborted', 'archived'])`（`services/team-service.js:57`）**只为** `team.resume` 留口，**不**为自动恢复留口。2.0 实施时给 UI 上的"interrupted 卡片"放两个按钮："Resume（同 run 续）" + "Rerun（克隆新 run）"——前者用现有 ALLOWED 转换，后者走 `team.rerun` 工具。v1.0 暂时只暴露 `team.rerun`；`team.resume` 是 P1 留口。
+
 ### 6.4 4 worker 上限
 
 `§9.12.9`：活跃 Run 数量无产品层队列 / 拒绝规则；**并发上限为实现层约束，直接引用宿主限制**——ACP adapter 的 agent 执行线程池硬上限 = 4 个并发 worker。

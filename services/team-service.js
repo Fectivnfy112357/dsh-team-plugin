@@ -280,6 +280,14 @@ export async function setDegraded(runId, reason) {
  * the host forks or runs multiple instances, this becomes unsound and the
  * 2.0 leader-election path is required.
  *
+ * For each run that flips to `interrupted`, this function also walks the
+ * per-run `dispatch-log.jsonl` and marks every dispatch whose latest line
+ * has no `terminal` field as `interrupted` (reason `process-killed`) —
+ * requirements.md §9.6 / architecture.md §6.2: "在途 dispatch 统一标记
+ * dispatch-interrupted". Half-baked artifacts are preserved (immutable
+ * snapshot, §9.11.4); the dispatch record itself becomes the anchor for a
+ * potential re-run injection (§9.12.4).
+ *
  * @returns {Promise<{ interrupted: string[] }>}
  */
 export async function reconcileOnBoot() {
@@ -294,14 +302,56 @@ export async function reconcileOnBoot() {
     if (holder !== undefined && holder !== HOLDER_PID) {
       await transition(meta.id, meta.state, 'interrupted', 'process-killed');
       interrupted.push(meta.id);
+      await markInFlightDispatchesInterrupted(meta.id);
     } else if (holder === undefined) {
       // No holder recorded (older meta.json); assume the previous DSH died
       // and mark interrupted. This is the conservative move.
       await transition(meta.id, meta.state, 'interrupted', 'process-killed');
       interrupted.push(meta.id);
+      await markInFlightDispatchesInterrupted(meta.id);
     }
   }
   return { interrupted };
+}
+
+/**
+ * Walk the per-run `dispatch-log.jsonl` and, for every dispatch whose latest
+ * line still has no `terminal` field, append a `terminal: 'interrupted'`
+ * marker via `DispatchService.markTerminal`. dispatch-log is append-only,
+ * so the latest line for a given dispatch id is the source of truth (the
+ * first line is the issue, any later line is a terminal marker).
+ *
+ * @param {string} runId
+ */
+async function markInFlightDispatchesInterrupted(runId) {
+  const path = join(runDir(runId), 'dispatch-log.jsonl');
+  if (!existsSync(path)) return;
+  let text;
+  try { text = await readFile(path, 'utf-8'); } catch { return; }
+  /** @type {Map<string, {terminal?: string}>} */
+  const latest = new Map();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (!row?.id) continue;
+    latest.set(row.id, row);
+  }
+  const inFlight = [];
+  for (const row of latest.values()) {
+    if (!row.terminal) inFlight.push(row.id);
+  }
+  if (inFlight.length === 0) return;
+  // Lazy import: dispatch-service does not import team-service, so the
+  // static graph is one-way, but the lazy form makes the call site at
+  // reconcileOnBoot read top-down.
+  const { markTerminal } = await import('./dispatch-service.js');
+  for (const dispatchId of inFlight) {
+    await markTerminal(runId, dispatchId, 'interrupted', {
+      reason: 'process-killed',
+      terminal_at: new Date().toISOString(),
+    });
+  }
 }
 
 /** @param {string} runId */
