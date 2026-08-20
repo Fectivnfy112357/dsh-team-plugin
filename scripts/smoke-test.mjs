@@ -1787,6 +1787,156 @@ try {
   newRunMeta.id !== rsrcId ? ok('new run has a fresh id') : bad('new run id collision');
   newRunMeta.state === 'pending' ? ok('new run starts at state=pending') : bad(`newRunMeta.state=${newRunMeta.state}`);
 
+  // ---- 20. team.resume: interrupted -> assembling + rejoin + flow restart ----
+  console.log('\n[20/19] team.resume (P1 #6)');
+  memberSvc._resetForTests();
+  pipeSvc._resetForTests();
+  msgSvc._resetForTests();
+  // Find team.resume in the tool list
+  const teamResume = teamTools.find((t) => t.name === 'team.resume');
+  teamResume && teamResume.execute
+    ? ok('team.resume tool is registered with an execute function')
+    : bad('team.resume missing execute');
+  // 20a) Resume a non-existent run throws
+  let notFoundErr = null;
+  try {
+    await teamResume.execute({ runId: 'definitely-does-not-exist' });
+  } catch (e) { notFoundErr = e; }
+  notFoundErr && /not found/.test(String(notFoundErr.message))
+    ? ok('team.resume on a non-existent run throws "not found"')
+    : bad(`notFoundErr=${notFoundErr?.message}`);
+  // 20b) Set up an interrupted run: start a round-table run, simulate
+  // an interrupt via reconcileOnBoot, then resume with a mock ctx.
+  const resumeMeta = await ts.start({
+    taskDescription: 'resume test',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [
+      { member_id: 'brain', instance_alias: 'b' },
+      { member_id: 'critic', instance_alias: 'c' },
+    ],
+  });
+  const resumeId = resumeMeta.id;
+  await ts.markHolder(resumeId);
+  await writeJsonFile(join(paths.teamRunsDir, resumeId, 'holder.pid'), '999999');
+  await ts.transition(resumeId, 'pending', 'assembling', 'team-formed');
+  await ts.transition(resumeId, 'assembling', 'running', 'flow-started');
+  // Force a "dead holder" by writing a foreign pid, then run reconcileOnBoot
+  await writeJsonFile(join(paths.teamRunsDir, resumeId, 'holder.pid'), '999999');
+  const reBootResult = await ts.reconcileOnBoot();
+  reBootResult.interrupted.includes(resumeId)
+    ? ok('reconcileOnBoot marked the run as interrupted (pre-resume)')
+    : bad(`interrupted=${JSON.stringify(reBootResult.interrupted)}`);
+  const interruptedMeta = await ts.readMeta(resumeId);
+  interruptedMeta.state === 'interrupted'
+    ? ok('pre-resume meta.state=interrupted')
+    : bad(`pre-resume state=${interruptedMeta.state}`);
+  // 20c) Resume with mock ctx that records startContinuable / followup.
+  // The flow engine will re-run round-table which will try to dispatch
+  // invites; we expect both members to be auto-joined and followup fired.
+  const resumeStart = [];
+  const resumeFollowup = [];
+  const ctxResume = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        resumeStart.push(spec);
+        return { childId: `rs-c-${resumeStart.length}-${Date.now().toString(36)}`, messageId: `rs-m-${resumeStart.length}` };
+      },
+      followup: async (parent, childId, content) => {
+        resumeFollowup.push({ parent, childId, content });
+        return `rs-fup-${resumeFollowup.length}`;
+      },
+      interrupt: async () => {},
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+    parent: { id: 'resume-sched' },
+  };
+  const resumeResult = await teamResume.execute({ runId: resumeId, reason: 'crash-recovery', __dshCtx: ctxResume });
+  resumeResult.runId === resumeId
+    ? ok('team.resume returns the original runId (not a clone)')
+    : bad(`resumeResult.runId=${resumeResult.runId}`);
+  resumeResult.state === 'assembling'
+    ? ok('team.resume returns state=assembling after the transition')
+    : bad(`resumeResult.state=${resumeResult.state}`);
+  Array.isArray(resumeResult.reJoined) && resumeResult.reJoined.length === 2
+    ? ok('team.resume reJoined both members (brain + critic)')
+    : bad(`resumeResult.reJoined=${JSON.stringify(resumeResult.reJoined)}`);
+  // The state machine should now show the assembling edge in state-history
+  const resumeHist = readFileSync(join(paths.teamRunsDir, resumeId, 'state-history.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const resumeEdge = resumeHist.find((h) => h.from_state === 'interrupted' && h.to_state === 'assembling' && h.reason === 'crash-recovery');
+  resumeEdge
+    ? ok('state-history contains `interrupted -> assembling` edge with the user reason')
+    : bad(`resumeHist edge missing`);
+  // Give the flow engine a moment to dispatch the round-1 invites
+  await new Promise((r) => setTimeout(r, 200));
+  resumeStart.length === 2
+    ? ok('team.resume re-launched flow engine: 2 members auto-joined via startContinuable')
+    : bad(`resumeStart.len=${resumeStart.length}`);
+  resumeFollowup.length === 2
+    ? ok('team.resume re-launched flow engine: 2 invites fired followup')
+    : bad(`resumeFollowup.len=${resumeFollowup.length}`);
+  // session-state.json for both members should be state=running after re-join
+  const reBrainSess20 = JSON.parse(readFileSync(join(paths.teamRunsDir, resumeId, 'sessions', 'brain', 'session-state.json'), 'utf-8'));
+  const reCriticSess20 = JSON.parse(readFileSync(join(paths.teamRunsDir, resumeId, 'sessions', 'critic', 'session-state.json'), 'utf-8'));
+  reBrainSess20.state === 'running' && reCriticSess20.state === 'running'
+    ? ok('team.resume: both members session-state.state=running after re-join')
+    : bad(`brain=${reBrainSess20.state} critic=${reCriticSess20.state}`);
+  // dispatch-log: should have at least the member-join rows for both members
+  const resumeDl = readFileSync(join(paths.teamRunsDir, resumeId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const resumeJoinRows = resumeDl.filter((r) => r.kind === 'member-join');
+  resumeJoinRows.length === 2
+    ? ok('team.resume dispatch-log: 2 member-join rows (one per re-join)')
+    : bad(`resumeJoinRows.len=${resumeJoinRows.length}`);
+
+  // 20d) Resume a non-interrupted run throws
+  const liveMeta = await ts.start({
+    taskDescription: 'live run',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const liveId = liveMeta.id;
+  await ts.markHolder(liveId);
+  await ts.transition(liveId, 'pending', 'assembling', 'team-formed');
+  let liveErr = null;
+  try {
+    await teamResume.execute({ runId: liveId });
+  } catch (e) { liveErr = e; }
+  liveErr && /state=assembling|state=running|state=interrupted/.test(String(liveErr.message))
+    ? ok('team.resume on a non-interrupted run throws with the actual state')
+    : bad(`liveErr=${liveErr?.message}`);
+
+  // 20e) No-op safety: resume on a fresh `assembling` run would throw the
+  // same "state=..." error; the assembling edge is irreversible from the
+  // test side, so the resume contract holds.
+  // (already covered by 20d)
+
+  // 20f) No __dshCtx (smoke-test scenario): resume falls back to v1.0
+  // dispatchLog path. The flow engine runs to terminal through the legacy
+  // test signal. We use a fresh run, mark interrupted, resume without ctx.
+  const legacyMeta = await ts.start({
+    taskDescription: 'legacy resume',
+    flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const legacyId = legacyMeta.id;
+  await ts.markHolder(legacyId);
+  await writeJsonFile(join(paths.teamRunsDir, legacyId, 'holder.pid'), '999999');
+  await ts.transition(legacyId, 'pending', 'assembling', 'team-formed');
+  await ts.transition(legacyId, 'assembling', 'running', 'flow-started');
+  await writeJsonFile(join(paths.teamRunsDir, legacyId, 'holder.pid'), '999999');
+  await ts.reconcileOnBoot();
+  // No __dshCtx: the resume still works for state + dispatchLog fallback
+  const legacyResume = await teamResume.execute({ runId: legacyId });
+  legacyResume.state === 'assembling'
+    ? ok('team.resume works without __dshCtx (state transition + re-join only; dispatch falls back to dispatchLog)')
+    : bad(`legacyResume.state=${legacyResume.state}`);
+
   console.log('');
   if (fail === 0) {
     console.log(`\u2705 smoke-test passed (${pass} checks)`);

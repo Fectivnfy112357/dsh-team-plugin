@@ -30,10 +30,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #1 留口 (第二批) | `40fe5fe` | `MemberService` 4 个留口方法落地:`sendMessage`(a2a-log + inbox + 轻量 followup);`dispatch`(自动 join if needed + scheduler->member followup + dispatch-log 落 scheduler + context_refs);`wake`(force-wake 无 dedup);`triggerSelfHandoff`(interrupt 旧 child + startContinuable 新 child + session_chain/handoff_files/self_handoff_count append + dispatch-log 落 kind=member-self-handoff);smoke-test [9j] 加 22 个新 check | `node scripts/verify.mjs` 5 层绿 · smoke-test 124 → 146 checks |
 | 2.0 #4 | (待 commit) | pipeline-with-feedback 跨步 `context_refs` 自动传播:`runPipeline` 维护 `stepOutputs[i] = { produced_artifact_ids }` in-memory map,派下一步时按优先级 (1) `step.context_refs` (2) `flow_config.context_refs_override[i]` (3) 派生自 `stepOutputs[i-1]` 三层 fallback;feedback retry 路径取最终 attempt 的产物;smoke-test [12b/19] 加 8 个新 check (auto-derive / step override / flow override / feedback retry / 隔离 / reset);导出 `_resetStepOutputsForTests(runId)` | `node scripts/verify.mjs` 5 层绿 · smoke-test 146 → 154 checks |
 | 2.0 #1 留口 (rewiring) | (待 commit) | 三个 flow (pipeline / round-table / fan-out) 替换 `dispatchLog` 占位为 `MemberService.dispatch`:`dispatchTask(ctx, runId, memberId, opts)` helper —— 有 `ctx.subagents.followup` 走 `MemberService.dispatch` (写 dispatch-log + followup + auto-join),否则回退到 v1.0 `dispatchLog` 纯日志路径;`lib/index.js` 在 tool 注册时闭包 `ctx` 到 `args.__dshCtx`,`team.start.execute` 读它并透传给 `flowSvc.run`;`team.start` 补 `pending → assembling` 转换;唯一写入者承诺 / 4 worker 上限 / degraded flag / max_rounds 全部保留;smoke-test [12c/19] / [12d/19] / [12e/19] / [12f/19] 加 22 个新 check (pipeline auto-join + followup + 跨步 context_refs 透传 / round-table dispatchTask fallback / fan-out 平行 + aggregator 含 context_refs / team.start → flowSvc.run → dispatchTask → MemberService.dispatch 端到端) | `node scripts/verify.mjs` 5 层绿 · smoke-test 154 → 176 checks |
+| P1 #6 team.resume | (待 commit) | `team.resume` 工具落地:读 meta → 校验 `interrupted → assembling` ALLOWED 边 → 重 join 成员 (`MemberService.joinRun`,idempotent) → 重启 flow engine;`__dshCtx` 透传 production 路径走 `MemberService.dispatch` followup,无 ctx 走 v1.0 `dispatchLog` fallback;terminated member 走 best-effort rollback(状态机 `assembling → interrupted` 不在 ALLOWED 表里,直接 append state-history + 改 meta.json);与 `team.rerun` 语义切分保持(同 run 回滚 vs 配置克隆);smoke-test [20/19] 加 14 个新 check (not-found / non-interrupted 拒绝 / 端到端 mock ctx re-join + flow 重启 / state-history edge / session-state running / dispatch-log member-join / 无 ctx fallback) | `node scripts/verify.mjs` 5 层绿 · smoke-test 176 → 190 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 176 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 190 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -48,7 +49,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring）
+- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -137,7 +138,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - ✅ `architecture.md §6.3` 加表格区分,2.0 实施时给 UI 的 interrupted 卡片放两个按钮
 
 **留口**:
-- 🟡 `team.resume` 工具实现(v1.0 暂不暴露,2.0 实施时加):读 `meta.json` 当前状态 → ALLOWED 转换 `interrupted → assembling` → 重 join 成员 → 重启 flow engine
+- ✅ `team.resume` 工具实现(本轮 commit) — 读 `meta.json` 当前状态 → ALLOWED 转换 `interrupted → assembling` → 重 join 成员 → 重启 flow engine
 
 ### P1.5 路线 — ✅ 已闭环（commit `d478fdd`）
 
