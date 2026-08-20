@@ -10,10 +10,18 @@
  * 'opencode' as a future extension point (closed set; users cannot add
  * new adapters without rebuilding the plugin — J decision, §12.1 A3).
  *
- * The actual subagent runtime registration goes through
- * `ctx.subagents` in the live DSH host (subagent named provider
- * registry). In v1.0 the test surface is the list shape; production
- * surfaces this list to subagent-acp at plugin apply() time.
+ * Provider registration strategy (2.0 #1, see PROGRESS.md):
+ *   The actual `ctx.subagents.registerProvider(...)` call lives in the
+ *   `@deepseek-ai/dsh-subagent-acp` Cordis plugin itself, NOT in team
+ *   plugin code. We declare three instances of that plugin in
+ *   `cordis.patch.yml`, each with a distinct `providerName` (acp-hermes,
+ *   acp-mcode, acp-claude-code). The DSH host loads them when it
+ *   composes its cordis.yml.
+ *
+ *   What `registerAdapters(ctx)` does: verify the three providerNames
+ *   are present on `ctx.subagents` after host composition, and warn
+ *   when one is missing. Returning the closed set is the contract the
+ *   tests rely on.
  *
  * @module dsh-team-plugin/adapters
  */
@@ -45,26 +53,39 @@ export function getAdapter(id) {
 }
 
 /**
- * Register the three adapters against the live subagent registry if
- * available. v1.0 no-op when subagent runtime is absent (unit tests);
- * production surfaces the registered providers to `ctx.subagents`.
- * @param {any} ctx - Cordis ctx (or null for tests)
+ * Verify the closed adapter set is present on the live subagent runtime
+ * and return the resolved records. v1.0 kept the name `registerAdapters`
+ * for backward compatibility with `lib/index.js`'s apply() hook, but the
+ * actual provider registration is now driven by `cordis.patch.yml` (see
+ * the file header for the full strategy). This function:
+ *   - returns the closed adapter list (always; this is the test contract),
+ *   - when a live `ctx.subagents` is available, verifies each `providerName`
+ *     is registered and logs INFO/WARN accordingly,
+ *   - never mutates the registry.
+ * @param {any} [ctx] - Cordis ctx (or null for tests without DSH runtime)
+ * @returns {Array<{ id: AdapterId, provider: string, exec: string, args: string[] }>}
  */
 export function registerAdapters(ctx) {
-  if (!ctx || !ctx.subagents) return [];
-  const registered = [];
-  for (const [id, def] of Object.entries(ADAPTERS)) {
+  const closed = /** @type {Array<{ id: AdapterId, provider: string, exec: string, args: string[] }>} */ (
+    listAdapterIds().map((id) => /** @type {any} */ ({ id, ...getAdapter(id) }))
+  );
+  if (!ctx || !ctx.subagents) return closed;
+  for (const { id, provider } of closed) {
     try {
-      // Real registration depends on the subagent named provider API
-      // (e.g. `ctx.subagents.registerProvider(def.provider, {...})`).
-      // v1.0 keeps the surface documented; the actual call is a P0+ hook.
-      if (typeof ctx.subagents.registerProvider === 'function') {
-        ctx.subagents.registerProvider(def.provider, def);
+      const present =
+        typeof ctx.subagents.getProvider === 'function'
+          ? ctx.subagents.getProvider(provider) !== undefined
+          : typeof ctx.subagents.list === 'function'
+            ? ctx.subagents.list().includes(provider)
+            : true; // can't tell; assume present
+      if (present) {
+        ctx.logger?.info?.(`adapters: ${id} (${provider}) present`);
+      } else {
+        ctx.logger?.warn?.(`adapters: ${id} (${provider}) not registered; check cordis.patch.yml`);
       }
-      registered.push({ id, ...def });
     } catch (e) {
-      ctx.logger?.warn?.(`adapters: failed to register ${id}: ${e.message}`);
+      ctx.logger?.warn?.(`adapters: ${id} verification failed: ${e.message}`);
     }
   }
-  return registered;
+  return closed;
 }

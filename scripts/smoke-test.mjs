@@ -466,6 +466,111 @@ try {
     ? ok('bridge dispose does not affect DP service itself')
     : bad(`bridgeDp2=${JSON.stringify(bridgeDp2)}`);
 
+  // ---- 9h. MemberService.joinRun + leaveRun (2.0 #1) ----
+  console.log('\n[9h] MemberService.joinRun + leaveRun');
+  const memberSvc = await importService('services/member-service.js');
+  memberSvc._resetForTests();
+  // Write a member catalog entry so `get(memberId)` resolves.
+  const { getTeamPaths } = await importService('services/paths.js');
+  const { ensureDir } = await importService('services/paths.js');
+  const membersDir = getTeamPaths().membersDir;
+  await ensureDir(membersDir);
+  const { writeFile: _writeFile } = await import('node:fs/promises');
+  await _writeFile(
+    join(membersDir, 'brain.json'),
+    JSON.stringify({ id: 'brain', role_id: 'brain', display_name: 'Brain', persona: '', adapter: 'hermes' }),
+    'utf-8',
+  );
+  // Build a run + skeleton session-state for the test
+  const memberRunMeta = await ts.start({
+    taskDescription: 'member test', flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const memberRunId = memberRunMeta.id;
+  await ts.markHolder(memberRunId);
+  // Mock ctx with a recording subagent runtime
+  const startCalls = [];
+  const interruptCalls = [];
+  const ctxMember = {
+    on: () => () => {},
+    emit: () => {},
+    logger: { info() {}, warn() {} },
+    subagents: {
+      startContinuable: async (spec) => {
+        startCalls.push(spec);
+        return { childId: `child-${startCalls.length}`, messageId: `msg-${startCalls.length}` };
+      },
+      interrupt: async (targetSessionId, authority) => {
+        interruptCalls.push({ targetSessionId, authority });
+      },
+      getProvider: () => ({ name: 'acp-hermes' }),
+      list: () => ['acp-hermes', 'acp-mcode', 'acp-claude-code'],
+    },
+  };
+  // joinRun (first call: spawns a child)
+  const fakeParent = { id: 'agent-user', session: { id: 'sess-user' } };
+  const join1 = await memberSvc.joinRun(ctxMember, memberRunId, 'brain', {
+    parent: fakeParent,
+    signal: new AbortController().signal,
+  });
+  join1?.childId?.startsWith('child-') && join1.provider === 'acp-hermes' && join1.state === 'running'
+    ? ok('joinRun returns childId + provider + state=running')
+    : bad(`join1=${JSON.stringify(join1)}`);
+  startCalls.length === 1 ? ok('ctx.subagents.startContinuable called exactly once') : bad(`startCalls=${startCalls.length}`);
+  const spec = startCalls[0];
+  spec?.provider === 'acp-hermes' && spec?.label === `brain-${memberRunId}` && spec?.request?.parent === fakeParent
+    ? ok('startContinuable spec carries provider + label + parent')
+    : bad(`spec=${JSON.stringify({ provider: spec?.provider, label: spec?.label, parent: spec?.request?.parent })}`);
+  Array.isArray(spec?.request?.prompt) && spec.request.prompt.length > 0
+    ? ok('startContinuable spec carries a non-empty prompt')
+    : bad(`prompt=${JSON.stringify(spec?.request?.prompt)}`);
+  // session-state.json now reflects the running child
+  const sessPath = join(paths.teamRunsDir, memberRunId, 'sessions', 'brain', 'session-state.json');
+  const sess = JSON.parse(readFileSync(sessPath, 'utf-8'));
+  sess.state === 'running' && sess.child_id === join1.childId && sess.provider === 'acp-hermes'
+    ? ok('session-state.json updated: state=running, child_id + provider set')
+    : bad(`sess=${JSON.stringify({ state: sess.state, child_id: sess.child_id, provider: sess.provider })}`);
+  Array.isArray(sess.session_chain) && sess.session_chain.includes(join1.childId)
+    ? ok('session-state.json session_chain contains the new childId')
+    : bad(`chain=${JSON.stringify(sess.session_chain)}`);
+  // dispatch-log has a member-join row
+  const dlAfterJoin = readFileSync(join(paths.teamRunsDir, memberRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const joinRow = dlAfterJoin.find((r) => r.kind === 'member-join' && r.to === 'brain');
+  joinRow && joinRow.child_id === join1.childId && joinRow.provider === 'acp-hermes'
+    ? ok('dispatch-log has member-join row pointing at the new child')
+    : bad(`joinRow=${JSON.stringify(joinRow)}`);
+  // Idempotency: a second joinRun does NOT call startContinuable again
+  const join2 = await memberSvc.joinRun(ctxMember, memberRunId, 'brain', { parent: fakeParent });
+  join2.childId === join1.childId && startCalls.length === 1
+    ? ok('joinRun is idempotent: second call returns the existing record')
+    : bad(`join2=${JSON.stringify(join2)} startCalls=${startCalls.length}`);
+  // leaveRun (with authority -> triggers interrupt)
+  const leave1 = await memberSvc.leaveRun(ctxMember, memberRunId, 'brain', {
+    reason: 'flow terminal',
+    authority: { kind: 'user', parentSessionId: 'sess-user' },
+  });
+  leave1.state === 'terminated' && leave1.interrupted === true
+    ? ok('leaveRun marks state=terminated and calls interrupt when authority given')
+    : bad(`leave1=${JSON.stringify(leave1)}`);
+  interruptCalls.length === 1 && interruptCalls[0].targetSessionId === join1.childId
+    ? ok('interrupt called with the live child session id')
+    : bad(`interruptCalls=${JSON.stringify(interruptCalls)}`);
+  const sessAfterLeave = JSON.parse(readFileSync(sessPath, 'utf-8'));
+  sessAfterLeave.state === 'terminated' && sessAfterLeave.leave_reason === 'flow terminal'
+    ? ok('session-state.json: state=terminated + leave_reason recorded')
+    : bad(`sessAfterLeave=${JSON.stringify({ state: sessAfterLeave.state, leave_reason: sessAfterLeave.leave_reason })}`);
+  const dlAfterLeave = readFileSync(join(paths.teamRunsDir, memberRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const leaveRow = dlAfterLeave.find((r) => r.kind === 'member-leave' && r.to === 'brain');
+  leaveRow && leaveRow.interrupted === true
+    ? ok('dispatch-log has member-leave row with interrupted=true')
+    : bad(`leaveRow=${JSON.stringify(leaveRow)}`);
+  // Re-leave is a no-op (idempotent)
+  const leave2 = await memberSvc.leaveRun(ctxMember, memberRunId, 'brain', { reason: 'again' });
+  leave2.state === 'terminated' && interruptCalls.length === 1
+    ? ok('leaveRun is idempotent: re-leave does not re-interrupt')
+    : bad(`leave2=${JSON.stringify(leave2)} interruptCalls=${interruptCalls.length}`);
+
   // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
   console.log('\n[10/19] PipelineFlow (happy path)');
   const pipeSvc = await importService('services/pipeline-flow.js');

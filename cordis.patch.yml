@@ -1,10 +1,53 @@
-# dsh-team-plugin dsh bundle patch: register the plugin at runtime.
-# Installed with: dsh plugin --profile <name> add <git-url|path|npm-name>
-# - insert: - id: <plugin-id>    (Cordis plugin id; ends with -skill is the
-#                                 convention used by the dsh-dual-plugin-guide
-#                                 scaffold but the actual id is arbitrary)
-#           name: '<package-name>'  (npm package name; Cordis resolves the
-#                                    installed module by this name)
+# dsh-team-plugin dsh bundle patch.
+#
+# Per dsh-dual-plugin-guide/references/packaging.md §4:
+#   - This is a YAML **overlay** (Node resolves the package by `name`).
+#   - Patch is merged per-line, not deep-merged, so any user-level overlay
+#     that re-states one of these entries wins on the colliding lines.
+#   - Insert a chain of plugin entries the host will load. Same name may
+#     appear multiple times with different `id`s and `config`s — useful
+#     for instantiating the same package under different settings.
+#
+# What we insert:
+#   1. `dsh-team-plugin-skill` — the plugin itself (registered in `lib/index.js`).
+#   2. Three `@deepseek-ai/dsh-subagent-acp` instances, each with a
+#      distinct `providerName`, so the closed adapter set listed in
+#      `services/adapters.js` (hermes / mcode / claude-code) has its
+#      corresponding `ctx.subagents` provider.
+#
+# Prerequisite: `@deepseek-ai/dsh-subagent-acp` must be installed in the
+# same DSH profile. The host's package manager resolves the name; we
+# don't pin a version here.
+#
+# Prerequisite: the three adapter executables (`hermes`, `mcode`,
+# `claude-agent-acp`) must be on PATH for the ACP provider to spawn
+# children successfully. If any command is missing the provider loads
+# but `startContinuable` rejects at runtime — surfaced through
+# MemberService.joinRun.
+
 - insert:
     - id: dsh-team-plugin-skill
       name: 'dsh-team-plugin'
+
+    - id: subagent-acp-hermes
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: acp-hermes
+        command: hermes
+        args: ['acp']
+        permission: reject
+
+    - id: subagent-acp-mcode
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: acp-mcode
+        command: mcode
+        args: ['acp']
+        permission: reject
+
+    - id: subagent-acp-claude-code
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: acp-claude-code
+        command: claude-agent-acp
+        permission: reject
