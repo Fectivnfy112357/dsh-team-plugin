@@ -167,6 +167,18 @@ try {
   }
 }
 
+// Tool output schema structural validity — dsh-tools' AJV validator runs
+// at host boot, not at lib load, so smoke tests never catch a stray
+// `properties` sibling of `schema` or a `required` name not present in
+// `properties`. See scripts/check-output-schema.mjs.
+const schemaCheck = spawnSync(process.execPath, [join(root, 'scripts', 'check-output-schema.mjs')], { encoding: 'utf8' });
+if (schemaCheck.status === 0) {
+  const m = schemaCheck.stdout.match(/OK\s+checked\s+(\d+)\s+tool\s+output\s+blocks/);
+  ok(`tool output schemas valid (${m ? m[1] : '?'} blocks)`);
+} else {
+  fail('tool output schema check failed:\n' + schemaCheck.stdout + '\n' + schemaCheck.stderr);
+}
+
 // ---- 5. smoke test ----
 console.log('\n[5/5] smoke test (services end-to-end)');
 const smoke = spawnSync(process.execPath, [join(root, 'scripts', 'smoke-test.mjs')], { encoding: 'utf8' });
