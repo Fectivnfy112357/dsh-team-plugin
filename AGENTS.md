@@ -46,6 +46,33 @@ DSH Team 插件的仓库——同时承载需求/设计文档（已落地）和�
    - `lib/index.js`（`apply(ctx)` 注册 Service + Skill + Tool + Slot）
    - `skills/start-team/SKILL.md`（内容唯一源）
 
+## 装到本地 DSH
+
+仓根路径有空格（`D:\programming\projects\my project\...`）会被 pnpm 切，必须 junction 到无空格路径再装：
+
+```powershell
+# 1. 建 junction（只建一次）
+New-Item -ItemType Junction -Path D:\dsh-plugins\dsh-agent-team -Target "D:\programming\projects\my project\dsh-agent-team"
+
+# 2. 装到 web profile（用户当前活跃 profile）
+dsh plugin --profile web add D:\dsh-plugins\dsh-agent-team
+
+# 3. 验
+dsh --profile web --dump-config | Select-String dsh-team-plugin
+#   应看到 `# == dsh-team-plugin` + `- id: dsh-team-plugin-skill`
+
+# 4. 实启
+dsh --profile web --port 0
+#   期望 stdout: `dsh web: http://127.0.0.1:<port>`，stderr 空
+```
+
+装上后两处 host 侧真错必修（dsh-team-plugin 已踩过）：
+
+- `inject: ['skills', 'tools', 'slots']` → 去掉 `slots`（client 才有）
+- 每个 `defineTool` 的 `output` 都加 `render: (...) => ContentBlock[]`
+
+验证：`node scripts/verify.mjs`（5 层 + 84 烟雾）独立于 DSH 跑，不依赖装到 DSH。
+
 ## 与深度研究团队的关系
 
 仓库内已有的 `team-v3-design.md` / `team-v3-spec.md` 属于**深度研究团队**的设计文档（在 `docs/deep-research/` 下），是 DSH Team 插件的一个使用场景（Story 3），但**与本仓正交**——本仓的 `requirements.md` / `architecture.md` 是 DSH Team 插件本身的产品定义 + 实现架构，不专属深度研究。
