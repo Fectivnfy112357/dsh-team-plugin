@@ -24,7 +24,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | docs(structure) | `9cd7965` | 把 `requirements.md` / `architecture.md` / `discussion-log.md` 移到 `docs/` 子目录 + 修正跨文件相对链接 | `node scripts/verify.mjs` 5 层绿 |
 | docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
 | P1.5-a / P1.5-b | `d478fdd` | `ui/team-plan.js` 新建 + slot 注册 + DP 实时订阅桥 (`wireDecisionPointBridge` → `team/decision-point-open` / `-respond` 事件总线) + `subscribeDps(ctx, onChange)` helper | `node scripts/verify.mjs` 5 层绿 · smoke-test 84 → 97 checks |
-| 2.0 #1 (部分) | `530af83` | 拍板: parent = exec.agent (option A);三个 subagent-acp entry 进 `cordis.patch.yml`;`MemberService.joinRun` / `leaveRun` 走 `ctx.subagents.startContinuable`;`services/adapters.js#registerAdapters` 改为 verify (不 register);`sendMessage / dispatch / wake / triggerSelfHandoff` 留 2.x | `node scripts/verify.mjs` 5 层绿 · smoke-test 97 → 110 checks |
+| 2.0 #1 (部分) | `530af83` + `40fe5fe` + `756b7b1` | 第一轮:parent = exec.agent (option A) 拍板;三个 subagent-acp entry 进 `cordis.patch.yml`;`MemberService.joinRun` / `leaveRun` 走 `ctx.subagents.startContinuable`;`services/adapters.js#registerAdapters` 改为 verify (不 register)。第二轮:4 留口方法 `sendMessage` / `dispatch` / `wake` / `triggerSelfHandoff` 全部落地(`MemberService.dispatch` 接 `ctx.subagents.followup` + auto-join)。第三轮 (本轮):flow engine rewiring 落地,三个 flow 替换 `dispatchLog` 为 `dispatchTask` helper(双路径:production 走 `MemberService.dispatch`,legacy 走 `dispatchLog`);`lib/index.js` 闭包 `ctx` 到 `args.__dshCtx` 让 `team.start` 真驱动子代理;`pending → assembling` 转换补全。**全闭环** | `node scripts/verify.mjs` 5 层绿 · smoke-test 97 → 110 → 146 → 176 checks |
 | 2.0 #3 | `d381f73` | `lib/index.js` 新增 `createTeamServiceBundle()` + `registerTeamServices(ctx)`;六个 service 模块聚合为一个 frozen 对象,作为 `team` 走 `ctx.provide('team', bundle)`(Cordis `reflect.ts#provide`)挂到 ctx;`apply()` step 3d 调用,effect-wrapped 自动清理;跨插件消费者 `const t = ctx.get('team'); t.members.list(); t.decisions.waitingDecisions(...);` | `node scripts/verify.mjs` 5 层绿 · smoke-test 110 → 120 checks |
 | 审阅收口 #1 | `aedbd10` | `reconcileOnBoot` 补全 per-dispatch mark:扫 dispatch-log,append `terminal=interrupted, reason=process-killed` 到每个 in-flight dispatch 末尾(原 issue 行不动,append-only 语义保留);`requirements.md §5.2/§4.3/§9.10.3` 加 `is_ad_hoc` 字段(schema 漂移修);`§9.7` 重连用语收口;`architecture.md §6.3` 切清 `team.resume` vs `team.rerun`;smoke-test [4/19] 扩 4 个新 check(in-flight 标 interrupted + reason + 已完成不被覆盖 + 原 issue 行保留) | `node scripts/verify.mjs` 5 层绿 · smoke-test 120 → 124 checks |
 | 2.0 #1 留口 (第二批) | `40fe5fe` | `MemberService` 4 个留口方法落地:`sendMessage`(a2a-log + inbox + 轻量 followup);`dispatch`(自动 join if needed + scheduler->member followup + dispatch-log 落 scheduler + context_refs);`wake`(force-wake 无 dedup);`triggerSelfHandoff`(interrupt 旧 child + startContinuable 新 child + session_chain/handoff_files/self_handoff_count append + dispatch-log 落 kind=member-self-handoff);smoke-test [9j] 加 22 个新 check | `node scripts/verify.mjs` 5 层绿 · smoke-test 124 → 146 checks |
@@ -63,9 +63,9 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 按依赖顺序排列，**先做哪个优先**。
 
-### 2.0 路线 — 1 项 + 3 项留口（按依赖递增）
+### 2.0 路线 — 5 项 closed（按依赖递增）
 
-#### #1 MemberService 真子代理驱动 — 🟡 部分完成 (commit `530af83` + `40fe5fe`)
+#### #1 MemberService 真子代理驱动 — ✅ 完成 (commit `530af83` + `40fe5fe` + `756b7b1`)
 
 **已完成** (第一轮 `530af83`):
 - ✅ 拍板 design 开放项:**parent = exec.agent (option A)**
@@ -81,12 +81,13 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - ✅ `triggerSelfHandoff(ctx, runId, memberId, opts)` — interrupt 旧 child + startContinuable 新 child + session-state.json 更新(current_session_id 替换、session_chain/handoff_files append、self_handoff_count +1、state 保持 running);dispatch-log 落 `kind: member-self-handoff`
 - ✅ smoke-test [9j] 22 个新 check(124 → 146): 各方法的 entry shape / dispatch-log row / session-state 字段 / no-op 路径 / idempotency / 边界
 
-**留口** (下轮 / 2.x):
+**已完成** (第三轮 `756b7b1` — flow engine rewiring):
 - ✅ **flow engine rewiring** —— `dispatchTask` helper 在三个 flow (pipeline / round-table / fan-out) 替换 `dispatchLog` 占位为 `MemberService.dispatch` (production) / `dispatchLog` (legacy test) 双路径;`lib/index.js` 闭包 `ctx` 到 `args.__dshCtx` 让 `team.start` 真驱动子代理;`pending → assembling` 转换补全;smoke-test 154 → 176 (22 个新 check)
+- ✅ 唯一写入者承诺 / 4 worker 上限 / degraded flag / max_rounds 全部保留;`signalStepTerminal` / `signalBranchTerminal` 仍是 test + production 共同的"step / branch 完成"信号(子代理在 DSH 内部走 `team.complete_step` 工具)
 
-**依赖**: 无前置 (独立模块,本轮已闭环核心)
+**依赖**: 无前置 (独立模块,本轮已全闭环)
 
-#### #2 跨 Run artifact 反向引用索引
+#### #2 跨 Run artifact 反向引用索引 — ✅ 完成 (commit `63864c9`)
 
 **Why deferred**: v1.0 `artifact-registry.js#refCount` 是 lazy 线性扫描。Run 多了会变慢（O(n) 每次 refCount 查询）。
 
