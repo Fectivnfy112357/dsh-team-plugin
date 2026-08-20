@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `530af83` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `d381f73` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
@@ -25,10 +25,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
 | P1.5-a / P1.5-b | `d478fdd` | `ui/team-plan.js` 新建 + slot 注册 + DP 实时订阅桥 (`wireDecisionPointBridge` → `team/decision-point-open` / `-respond` 事件总线) + `subscribeDps(ctx, onChange)` helper | `node scripts/verify.mjs` 5 层绿 · smoke-test 84 → 97 checks |
 | 2.0 #1 (部分) | `530af83` | 拍板: parent = exec.agent (option A);三个 subagent-acp entry 进 `cordis.patch.yml`;`MemberService.joinRun` / `leaveRun` 走 `ctx.subagents.startContinuable`;`services/adapters.js#registerAdapters` 改为 verify (不 register);`sendMessage / dispatch / wake / triggerSelfHandoff` 留 2.x | `node scripts/verify.mjs` 5 层绿 · smoke-test 97 → 110 checks |
+| 2.0 #3 | `d381f73` | `lib/index.js` 新增 `createTeamServiceBundle()` + `registerTeamServices(ctx)`;六个 service 模块聚合为一个 frozen 对象,作为 `team` 走 `ctx.provide('team', bundle)`(Cordis `reflect.ts#provide`)挂到 ctx;`apply()` step 3d 调用,effect-wrapped 自动清理;跨插件消费者 `const t = ctx.get('team'); t.members.list(); t.decisions.waitingDecisions(...);` | `node scripts/verify.mjs` 5 层绿 · smoke-test 110 → 120 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 110 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 120 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -43,7 +44,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 16 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun）
+- 17 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -81,16 +82,18 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **依赖**: 无（独立优化）
 
-#### #3 Cordis Service 跨插件注册
+#### #3 Cordis Service 跨插件注册 — ✅ 完成 (commit `d381f73`)
 
-**Why deferred**: v1.0 services 是 bare modules（`import { list } from './services/member-service.js'`），其他插件拿不到 DSH Team 的运行时能力。
+**已完成** (本轮):
+- ✅ 拍板 API:`ctx.provide(name, value)`(Cordis `reflect.ts#provide`,`ctx.provide` 经 `mixin('reflect', ['provide', ...])` 混到 ctx 上)
+- ✅ `createTeamServiceBundle()` —— 六个 service 模块聚合为一个 frozen 对象 `{ team, members, decisions, messages, plans, artifacts }`,并行 `Promise.all` 加载(模块缓存后零成本)
+- ✅ `registerTeamServices(ctx)` —— `ctx.effect(() => ctx.provide('team', bundle))`,effect 卸载时自动调 dispose
+- ✅ `apply()` step 3d 在 DP bridge 之后调用,无 `ctx.provide` 时短路(无运行时 smoke-test 场景)
+- ✅ smoke-test 110 → 120 checks: bundle shape / 6 keys / frozen / 每 key 函数齐全 / no-op ctx / `ctx.provide` 形参与名 / effect 包装 / dispose 链
 
-**目标形态**:
-- 在 `apply(ctx)` 里 `ctx.effect(() => ctx.register('team', { ... }))`
-- 暴露：`ctx.team`（TeamService）、`ctx.team.members`（MemberService）、`ctx.team.decisions`（DecisionPointService）、`ctx.team.messages`（MessageService）、`ctx.team.plans`（PlanService）、`ctx.team.artifacts`（ArtifactRegistry）
-- `lib/index.js` 当前不注册 Cordis service —— 加 5 行 `ctx.effect(() => ctx.register(...))` 即可
+**留口**: 无
 
-**依赖**: 顺序在 #1 之后（先有 service 实例，再注册到 ctx），但与 #1 可并行开发（接口形状已知）
+**依赖**: 无前置 (独立模块)
 
 ### P1.5 路线 — ✅ 已闭环（commit `d478fdd`）
 
@@ -143,7 +146,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 P1.5-a team-plan slot UI       ✅ commit d478fdd
 P1.5-b 实时 DP 订阅             ✅ commit d478fdd
 2.0 #1 MemberService 真子代理    🟡 commit 530af83 (joinRun/leaveRun 闭环; sendMessage/dispatch/wake/triggerSelfHandoff + flow engine 改造 留 2.x)
-2.0 #3 Cordis Service 注册       ← 独立重构,可与 #1 并行
+2.0 #3 Cordis Service 注册       ✅ commit d381f73 (frozen bundle on ctx.team via ctx.provide)
 2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
 ```
 
