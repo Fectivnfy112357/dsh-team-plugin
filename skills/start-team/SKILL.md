@@ -5,12 +5,6 @@ description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成�
 
 # start-team — DSH Team 启动入口
 
-> 完整设计文档（产品形态 / Service 接口 / 状态机 / 流程）见项目仓库 `docs/` 子目录：
-> - https://github.com/Fectivnfy112357/dsh-team-plugin/blob/main/docs/requirements.md
-> - https://github.com/Fectivnfy112357/dsh-team-plugin/blob/main/docs/architecture.md
->
-> 本 skill **不**把 docs/ 装入插件运行时（`package.json#files` 只含运行所需），上面的 GitHub 链接是面向用户/agent 的纯文档参考。
-
 ## 调用流程
 
 按以下步骤串行执行；任一步失败 → 停止后续步骤，把错误回报给用户。
@@ -27,7 +21,7 @@ description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成�
 
 ### Step 2 — 确认 flow 类型
 
-按 `requirements.md §3` 三选一：
+三选一：
 
 | Flow | 适用 | 默认 |
 |---|---|---|
@@ -43,7 +37,7 @@ description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成�
 
 ### Step 3 — 选 / 拼 members
 
-按 `requirements.md §2.1 / §2.2`，每个 member 由 role 实例化得到。两个来源：
+每个 member 由 role 实例化得到（一个 role = 一种能力描述，如 "brainstormer" / "critic" / "synthesizer"）。两个来源：
 
 1. **从 `team-template`**：调 `team.list_templates`，给用户看可用模板；用户选一个 → 用模板里的 members
 2. **手动拼队**：从 `members/` 已有素材中挑，或临时新建 member（需要 role_id）
@@ -54,7 +48,7 @@ description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成�
 
 ### Step 4 — 调 `team.start` 工具
 
-DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` / `startTeam`）。按 `architecture.md §4.1` 的 `StartTeamRunRequest` schema：
+DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` / `startTeam`）。`StartTeamRunRequest` schema：
 
 ```json
 {
@@ -75,7 +69,7 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 }
 ```
 
-工具调用由 DSH agent 运行时经 `tools/call` 完成（详见 `references/agent-plugins-1.0.md` 的 tool 协议）。
+工具调用由 DSH agent 运行时经 `tools/call` 完成（Agent Plugins 1.0 tool 协议）。
 
 ### Step 5 — 回报结果
 
@@ -87,7 +81,7 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 
 ## 关键边界
 
-按 `requirements.md §4` 用户与 Team 的交互边界：
+Team Run 启动后的交互边界（不要违反）：
 
 - Team Run 启动后，**用户没有过程性手动介入权**——不要在启动后试图让 agent 插话
 - 用户唯一的两个主动动作：
@@ -101,6 +95,6 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 | 症状 | 原因 | 应对 |
 |---|---|---|
 | `team.start` 报 `team_templates_empty` | 素材库未初始化 | 引导用户去 team-config 配置中心建 role / member / template |
-| `team.start` 报 `adapter_not_registered: <name>` | Role 选用了未注册的 adapter | 检查 `architecture.md §10.1` 封闭 adapter 集合（`hermes` / `mcode` / `claude-code`）|
+| `team.start` 报 `adapter_not_registered: <name>` | Role 选用了未注册的 adapter | 封闭 adapter 集合是 `hermes` / `mcode` / `claude-code`；让用户换一个 |
 | 工具调用超时 | DSH 阻塞 / 网络问题 | 重试 1 次；仍失败 → 报告"DSH Team 插件暂不可用" |
 | 用户描述任务含糊（如"帮我优化一下"）| task description 缺关键信息 | 走 Step 1 追问，不要凭印象默认填 |
