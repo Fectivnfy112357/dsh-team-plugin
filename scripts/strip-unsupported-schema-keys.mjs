@@ -43,16 +43,24 @@ for (let i = 0; i < lines.length; i++) {
   if (KEY_RE.test(line)) { removed++; continue; }
   if (REQUIRED_RE.test(line)) {
     removed++;
-    // Walk forward until the matching `]`. We only count `[` and `]`
-    // (skip string contents); a malformed line without a closer
-    // would be the original file's bug, not ours to fix here.
-    let depth = 1;
-    while (i + 1 < lines.length && depth > 0) {
-      i++;
-      const l = lines[i];
-      for (const c of l) {
-        if (c === '[') depth++;
-        else if (c === ']') { depth--; if (depth === 0) break; }
+    // Scan THIS line first (the `required: [` open lives on it),
+    // then walk forward until the matching `]`. The depth counter
+    // starts at 0 and tracks `[` / `]` literally — string contents
+    // are not in scope for the banned-key drop, and the regex
+    // already filters out the `required: true` (boolean) case.
+    let depth = 0;
+    for (const c of line) {
+      if (c === '[') depth++;
+      else if (c === ']') { depth--; if (depth === 0) break; }
+    }
+    if (depth > 0) {
+      while (i + 1 < lines.length && depth > 0) {
+        i++;
+        const l = lines[i];
+        for (const c of l) {
+          if (c === '[') depth++;
+          else if (c === ']') { depth--; if (depth === 0) break; }
+        }
       }
     }
     continue;

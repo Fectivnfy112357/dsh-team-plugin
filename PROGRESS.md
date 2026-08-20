@@ -60,6 +60,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - 可见性: public
 - 默认分支: main
 - 23 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引 + P2 抛光 A2A payload + P2 抛光 硬删兜底 + P2 抛光 §10 视觉评估 + 5 OQ close 措辞签字 + **2.0 §2 全 17 项闭环 (A1-A8 + B1-B11)** = `4f3af37`）
+- 24 个 commit 已 push（+ **fix(client+tools): real DSH slots + tool schema DSL** = working tree）—— 把"DSH 客户端没看到 Team 设置入口 + host 端 tool schema 校验不过就 crash"两个**预先就存在**的 bug 一起修了：client 侧补 `lib/client.js` (esbuild 单文件 bundle，浏览器拉得到);`ui/*.js` 的 6 个 chrome slot 注册从 `client-ui-*` 假名切到 `shell.overlay` / `conversation.view` / `sidebar.footer.action` / `tool.call.toolview` 真名;`lib/index.js` 删 host 端死代码 slot 注册;`lib/tools/team-tools.js` 29 个 tool 的 `parameters` 从 `{ type: 'object', required: [...], properties: {...} }` JSON-Schema 形状 改 dsh-tools property-map 形状;`output.schema` 同理去掉 `required` 数组 + 给所有 `type: 'object'` schema 补 `additionalProperties: true`。`node scripts/verify.mjs` 5 层绿 · `node scripts/test-install.mjs` 15/15 过 · host 启动 `dsh web: http://127.0.0.1:<port>` 干净 boot · HTTP 200 · stderr 空
 - Description 用 `package.json#description` 原文
 
 ---
