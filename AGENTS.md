@@ -16,9 +16,10 @@ DSH Team 插件的仓库——同时承载需求/设计文档（已落地）和�
 | 路径 | 状态 | 用途 |
 |---|---|---|
 | `README.md` | ✅ | 文档总索引 + 一句话定义 |
-| `requirements.md` | ✅ v1 闭环 + 第五轮机制层扩展 + 第六/七轮审阅收口 | 需求规格（产品形态 + 机制层定稿）|
-| `discussion-log.md` | ✅ 七轮 | 讨论过程 / 关键决策 / 被否决方案（按轮次）|
-| `architecture.md` | ✅ v1 骨架（模块 / 状态机 / 三个 Flow / UI Slot / 打包）| 实现侧架构（Service 接口骨架 / 状态机 / 三个 Flow / Slot / 打包形态）|
+| `docs/requirements.md` | ✅ v1 闭环 + 第五轮机制层扩展 + 第六/七轮审阅收口 | 需求规格（产品形态 + 机制层定稿）|
+| `docs/discussion-log.md` | ✅ 七轮 | 讨论过程 / 关键决策 / 被否决方案（按轮次）|
+| `docs/architecture.md` | ✅ v1 骨架（模块 / 状态机 / 三个 Flow / UI Slot / 打包）| 实现侧架构（Service 接口骨架 / 状态机 / 三个 Flow / Slot / 打包形态）|
+| `PROGRESS.md` | ✅ v1.0 收口 + 2.0 路线 | 进度快照（已完成 / 未完成 / 待拍板 / 留口）|
 | `mockups/` | ✅ | UI 草图 HTML（`panel-linear.html` 为当前骨架）|
 | `AGENTS.md` | — | 本文件——给 Agent 看的项目约定 |
 
