@@ -139,6 +139,33 @@ if (existsSync(libPath)) {
   }
 }
 
+// Static check: package.json must declare the client side so
+// DSH `client-modules` can serve the browser artifact. The dsh.client
+// declaration is what makes the client half loadable; without it the
+// settings entry never appears in the web UI even though the host
+// side loads fine.
+const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
+if (existsSync(pkgPath)) {
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  if (pkg.dsh?.client?.platform === 'web' && pkg.exports?.['./client']) {
+    ok(`dsh.client + exports["./client"] declared (client side will be served at /plugins/${'dsh-team-plugin'}/client.js)`);
+  } else {
+    fail('package.json missing dsh.client.platform="web" or exports["./client"] — Team settings entry will not appear in the DSH web UI');
+  }
+}
+
+// Verify the bundled client.js exists (built by `npm run build:client`,
+// which `npm run precheck` runs before `npm run check`). Without the
+// bundle on disk, client-modules serves a 404 and the slot registrations
+// are silently dropped.
+const clientJsPath = fileURLToPath(new URL('../lib/client.js', import.meta.url));
+if (existsSync(clientJsPath)) {
+  const size = readFileSync(clientJsPath).length;
+  ok(`lib/client.js present (${size} bytes)`);
+} else {
+  fail('lib/client.js missing — run `npm run build:client` (or `npm run check` which auto-builds)');
+}
+
 // ---- 2. manifest ----
 console.log('\n[2/4] profile manifest');
 

@@ -156,20 +156,29 @@ export function ConversationTimeline(props) {
 }
 
 /**
- * Register the conversation slot.
+ * Register the Team timeline on the real DSH `conversation.view` slot
+ * (kind: list, scope: session). Catalog reference:
+ * `cordis-client-runner/src/client/slot-catalog.ts:970` (additive,
+ * `replaceRisk: 'none'`). The shipped occupants are `client-ui-conversation
+ * ChatView id 'chat'` and `client-ui-trajectory TrajectoryView id
+ * 'trajectory'`; a fresh `id: 'team-timeline'` lands as a third
+ * view-tab entry, activated by the session body via `only: 'team-timeline'`.
+ *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerConversationSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; conversation slot registration skipped');
+  if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/conversation: ctx.slots.inject unavailable; team-timeline skipped');
     return;
   }
-  ctx.effect(() =>
+  ctx.slots.inject('conversation.view', () =>
     ctx.slots.register({
-      name: 'client-ui-conversation',
+      name: 'conversation.view',
       kind: 'list',
+      id: 'team-timeline',
+      order: 100,
+      label: 'Team',
       component: ConversationTimeline,
-      label: 'DSH Team Conversation',
     }),
   );
 }

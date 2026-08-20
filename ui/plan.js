@@ -76,21 +76,27 @@ export function PlanSurface(props) {
  */
 export { loadPlan };
 
+// TODO(team-plugin/2.0 backlog): `PlanSurface` is NOT registered into a
+// slot because the only viable home — `conversation.input.plan`
+// (kind: single, scope: session) — is occupied by the shipped
+// `client-ui-plan PlanChip` (catalog:
+// `cordis-client-runner/src/client/slot-catalog.ts:752`). The single
+// seat means taking it would replace the shipped plan affordance
+// wholesale. Team plans are still rendered into the conversation view
+// via the `team-timeline` view-tab (see `ui/conversation.js`); the
+// `team-plan` keyed slot (legacy `team-panel.js` registration) is
+// also kept as a render seam for host-resolved plans. `registerPlanSlot`
+// is therefore a no-op for now; the component export stays so future
+// work can re-target `conversation.input.plan` (or a new "team plan"
+// sub-slot) without re-authoring the JSX.
+
 /**
- * Register the plan slot (fallback).
- * @param {import('@deepseek-ai/cordis').Context} ctx
+ * No-op slot registrar. Team plans are rendered into the conversation
+ * view via the `team-timeline` tab; the `team-plan` keyed slot is
+ * registered by `ui/team-panel.js#registerTeamSlots`. See the
+ * file-level TODO for the `conversation.input.plan` constraint.
+ * @param {import('@deepseek-ai/cordis').Context} _ctx
  */
-export function registerPlanSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; plan slot registration skipped');
-    return;
-  }
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'client-ui-plan',
-      kind: 'keyed',
-      component: PlanSurface,
-      label: 'DSH Team Plan (fallback)',
-    }),
-  );
+export function registerPlanSlot(_ctx) {
+  // intentionally empty: see file-level TODO.
 }

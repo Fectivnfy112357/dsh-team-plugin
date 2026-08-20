@@ -153,24 +153,26 @@ function actionButtonStyle(action) {
   };
 }
 
+// TODO(team-plugin/2.0 backlog): `UserQuestionCard` is NOT registered
+// into a slot because the only viable home — `conversation.composer`
+// (chain, scope: session) — is already occupied by the shipped
+// `client-ui-user-questions QuestionComposer` (catalog:
+// `cordis-client-runner/src/client/slot-catalog.ts:337`). Taking the
+// chain would replace the shipped composer takeover wholesale and
+// break ask_user_question rendering for non-team sessions. The card
+// itself is still rendered into the conversation flow as a
+// conversation.chat.node key ('team-decision-card', to land in a
+// follow-up) and via the host event bridge
+// (`team/decision-point-open` from `lib/index.js#wireDecisionPointBridge`).
+// `registerUserQuestionsSlot` is therefore a no-op for now; the
+// component export stays so future work can re-target the slot
+// without re-authoring the JSX.
+
 /**
- * Register the user-questions slot. The host renders the card via the
- * `client-ui-user-questions` slot; the card is keyed (one card per
- * decision point).
- *
- * @param {import('@deepseek-ai/cordis').Context} ctx
+ * No-op slot registrar. The component is wired through other seams
+ * (host event bus, conversation timeline). See the file-level TODO.
+ * @param {import('@deepseek-ai/cordis').Context} _ctx
  */
-export function registerUserQuestionsSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; user-questions slot registration skipped');
-    return;
-  }
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'client-ui-user-questions',
-      kind: 'keyed',
-      component: UserQuestionCard,
-      label: 'DSH Team User Question Card',
-    }),
-  );
+export function registerUserQuestionsSlot(_ctx) {
+  // intentionally empty: see file-level TODO.
 }

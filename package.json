@@ -6,6 +6,7 @@
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -20,7 +21,10 @@
   ],
   "scripts": {
     "check": "node scripts/verify.mjs",
-    "test-install": "node scripts/test-install.mjs"
+    "test-install": "node scripts/test-install.mjs",
+    "build:client": "node scripts/build-client.mjs",
+    "precheck": "npm run build:client",
+    "prepublishOnly": "npm run build:client"
   },
   "license": "MIT",
   "keywords": [
@@ -47,6 +51,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
     }
   }
 }

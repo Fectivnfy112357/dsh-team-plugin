@@ -104,20 +104,82 @@ function statusColor(status) {
 }
 
 /**
- * Register the tool slot.
+ * Every `team.*` tool name registered by `lib/tools/team-tools.js`.
+ * Each becomes a separate `key` on the `tool.call.toolview` slot so
+ * the wire dispatch lands on the Team-specific card instead of the
+ * generic fallback. The set is the source of truth — if a new
+ * `team.*` tool lands, add it here too.
+ *
+ * @type {readonly string[]}
+ */
+const TEAM_TOOL_NAMES = Object.freeze([
+  // 1.0 lifecycle (8)
+  'team.start',
+  'team.list',
+  'team.abort',
+  'team.list_runs',
+  'team.rerun',
+  'team.resume',
+  'team.check_cost_cap',
+  'team.list_adapters',
+  // 1.5 decision points (3)
+  'team.open_decision_point',
+  'team.respond_decision_point',
+  'team.list_decision_points',
+  // 1.5 step / branch signals (4)
+  'team.complete_step',
+  'team.fail_step',
+  'team.complete_branch',
+  'team.fail_branch',
+  // 1.5 plan (2)
+  'team.add_plan',
+  'team.list_plans',
+  // 1.5 artifact (3)
+  'team.register_artifact',
+  'team.list_artifacts',
+  'team.delete_artifact',
+  // 2.0 CRUD role / member / template (9)
+  'team.create_role',
+  'team.update_role',
+  'team.delete_role',
+  'team.create_member',
+  'team.update_member',
+  'team.delete_member',
+  'team.create_template',
+  'team.update_template',
+  'team.delete_template',
+]);
+
+/**
+ * Register the tool call views on the real DSH `tool.call.toolview`
+ * slot (kind: keyed, scope: session, dispatch by wire tool name).
+ * Catalog reference:
+ * `cordis-client-runner/src/client/slot-catalog.ts:1628` (`replaceRisk:
+ * 'none'`, key domain open: any string the owner dispatches). All
+ * `team.*` keys are free (none in the shipped key set, see catalog
+ * line 1656), so this is purely additive.
+ *
+ * The previous version used a single registration with no `key` field
+ * — that lands on the generic fallback, not the keyed dispatch, so
+ * every team tool call would still render with the shipped tool card.
+ * One register call per `key` is the contract the catalog documents.
+ *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerToolSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; tool slot registration skipped');
+  if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/tool: ctx.slots.inject unavailable; team.* tool views skipped');
     return;
   }
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'client-ui-tool',
-      kind: 'keyed',
-      component: TeamToolCall,
-      label: 'DSH Team Tool Call',
-    }),
-  );
+  for (const toolName of TEAM_TOOL_NAMES) {
+    ctx.slots.inject('tool.call.toolview', () =>
+      ctx.slots.register({
+        name: 'tool.call.toolview',
+        kind: 'keyed',
+        key: toolName,
+        component: TeamToolCall,
+        label: `DSH Team Tool: ${toolName}`,
+      }),
+    );
+  }
 }

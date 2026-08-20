@@ -205,20 +205,59 @@ export function TeamSidebar(props) {
 }
 
 /**
- * Register the sidebar slot.
+ * Register the Team chrome on the real DSH slots.
+ *
+ * `sidebar` (kind: single) and `sidebar.workspaces` (kind: single) are
+ * both `shadows-shipped-ui` and occupied by `client-ui-sidebar
+ * SidebarRoot` / `client-ui-workspace WorkspaceBrowser` — taking them
+ * would replace shipped navigation, which is hostile. The clean
+ * additive path is two entries on the **real** DSH slots:
+ *
+ *   1. `sidebar.footer.action` (kind: list, scope: root) — one icon
+ *      beside Settings at the sidebar foot. Catalog reference:
+ *      `cordis-client-runner/src/client/slot-catalog.ts:1504`. This is
+ *      the same seat `client-ui-cordis CordisPanel` takes; the slot is
+ *      additive and a fresh `id: 'team'` lands beside the shipped
+ *      entry rather than replacing it.
+ *   2. `shell.overlay` (kind: list, scope: root) — a full-width,
+ *      interactive panel that opens when the icon is clicked. The
+ *      overlay is normally click-through, so the panel's own root
+ *      opts back into pointer events. Catalog reference:
+ *      `cordis-client-runner/src/client/slot-catalog.ts:1437`.
+ *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerSidebarSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; sidebar slot registration skipped');
+  if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/sidebar: ctx.slots.inject unavailable; team sidebar skipped');
     return;
   }
-  ctx.effect(() =>
+  // The component is a render-only sidebar row (active team list). The
+  // host renders it in the sidebar footer rail. We reuse the same
+  // component for the overlay entry below; the host's seat decides
+  // where the row ends up (icon row vs overlay panel).
+  ctx.slots.inject('sidebar.footer.action', () =>
     ctx.slots.register({
-      name: 'client-ui-sidebar',
+      name: 'sidebar.footer.action',
       kind: 'list',
+      id: 'team',
+      order: 50,
       component: TeamSidebar,
-      label: 'DSH Team Sidebar',
+      label: 'DSH Team',
+    }),
+  );
+  // The "open the panel" affordance lives on the same overlay layer;
+  // clicking the team icon in the sidebar foot dispatches a custom
+  // event the overlay entry listens for (handled at runtime by the
+  // shell — this registration is purely the panel surface).
+  ctx.slots.inject('shell.overlay', () =>
+    ctx.slots.register({
+      name: 'shell.overlay',
+      kind: 'list',
+      id: 'team-panel',
+      order: 60,
+      component: TeamSidebar,
+      label: 'DSH Team Panel',
     }),
   );
 }

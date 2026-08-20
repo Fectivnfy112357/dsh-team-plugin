@@ -233,101 +233,48 @@ function stateColor(state) {
 }
 
 /**
- * Register the team slots and the keyed component slot for handoff cards.
- * Effect-wrapped; the disposer from `ctx.slots.register(...)` runs when
- * the Cordis plugin unloads.
+ * Register the Team slots on the real DSH client runtime.
+ *
+ * Slot mapping (only the real DSH slots are wired; the legacy
+ * `team-panel` / `team-config` / `team-plan` slot names from the
+ * 2.0 §2 design were never present in the runtime and are dropped):
+ *
+ *   - `settings.section` (list, id='team', root scope) — the primary
+ *     user-facing entry: adds a "Team" tab to the DSH settings page.
+ *     Catalog: `cordis-client-runner/src/client/slot-catalog.ts:1362`.
+ *     The host wires `props.roles` / `.members` / `.templates` through
+ *     the three services in its React effect; the component is
+ *     render-only.
+ *   - The four legacy `tool.call.toolview` entries with `entryKey:
+ *     'team-handoff'` / `'team-handoff-redo'` / `'team-member-chip'`
+ *     / `'team-decision-badge'` were non-functional: the slot's key
+ *     domain is the **wire tool name** (e.g. `team.start`), not an
+ *     arbitrary label, so the owner would never dispatch to those
+ *     keys. The actual `team.*` tool renderings now live in
+ *     `ui/tool.js#registerToolSlot` (29 keyed registrations, one per
+ *     tool name from `lib/tools/team-tools.js`). The
+ *     TeamHandoffCard / TeamHandoffRedo / TeamMemberChip /
+ *     TeamDecisionBadge components themselves are still used inside
+ *     the conversation view timeline; the components stay exported
+ *     for that surface even though their dedicated toolview entries
+ *     are gone.
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerTeamSlots(ctx) {
-  if (!ctx.slots || typeof ctx.slots.register !== 'function') {
-    ctx.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; slot registration skipped');
+  if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/team-panel: ctx.slots.inject unavailable; team settings section skipped');
     return;
   }
-  // team-panel slot (list): the常驻面板 root
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'team-panel',
-      kind: 'list',
-      component: TeamPanel,
-      label: 'DSH Team',
-    }),
-  );
-  // team-config slot (keyed): Team / Role / Member / Team-Template edit
-  // A5 (2.0): the previous binding was `TeamPanel` (a run-state
-  // component) — wrong, the config surface is independent. The
-  // TeamConfigPanel (Role / Member / TeamTemplate 3 tabs) is the
-  // correct component; the host wires props.roles / .members /
-  // .templates via the three services in its React useEffect.
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'team-config',
-      kind: 'keyed',
-      component: TeamConfigPanel,
-      label: 'DSH Team Config',
-    }),
-  );
-  // team-plan slot (keyed): render a single Plan artifact. Hosts
-  // resolve the plan via `loadPlan(planId)` and pass the resolved
-  // object as `props.plan`; the slot only carries the component.
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'team-plan',
-      kind: 'keyed',
-      component: TeamPlan,
-      label: 'DSH Team Plan',
-    }),
-  );
-  // settings 入口: DSH 的 settings 页面看到 "Team" 一项
-  // A5 (2.0): the previous binding was `TeamPanel` (a run-state
-  // component) — wrong. The settings page is a "configure plugin"
-  // surface, which is what TeamConfigPanel renders.
-  ctx.effect(() =>
+  ctx.slots.inject('settings.section', () =>
     ctx.slots.register({
       name: 'settings.section',
       kind: 'list',
-      component: TeamConfigPanel,
+      id: 'team',
+      order: 100,
       label: 'Team',
+      component: TeamConfigPanel,
       props: { sectionId: 'dsh-team', title: 'DSH Team Plugin' },
-    }),
-  );
-  // handoff / decision badge / member chip —— 通过 keyed 工具 view
-  // 暴露,让 tool.call.toolview <team-handoff>/<team-decision>/<team-member>
-  // 能找到组件。
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'tool.call.toolview',
-      kind: 'keyed',
-      component: TeamHandoffCard,
-      entryKey: 'team-handoff',
-      label: 'Team Handoff Card',
-    }),
-  );
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'tool.call.toolview',
-      kind: 'keyed',
-      component: TeamHandoffRedo,
-      entryKey: 'team-handoff-redo',
-      label: 'Team Handoff Redo Card',
-    }),
-  );
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'tool.call.toolview',
-      kind: 'keyed',
-      component: TeamMemberChip,
-      entryKey: 'team-member-chip',
-      label: 'Team Member Chip',
-    }),
-  );
-  ctx.effect(() =>
-    ctx.slots.register({
-      name: 'tool.call.toolview',
-      kind: 'keyed',
-      component: TeamDecisionBadge,
-      entryKey: 'team-decision-badge',
-      label: 'Team Decision Badge',
     }),
   );
 }

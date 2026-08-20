@@ -139,34 +139,46 @@ function stateColor(state) {
 }
 
 /**
- * Register the layout slot. The host renders `TeamTopBar` for the top
- * fragment and `TeamFooter` for the footer fragment; the slot kind is
- * `list` so the host can stack multiple layout fragments. Each
- * component is registered as a separate entry under the same slot
- * name with a `kind` prop that disambiguates top vs footer.
+ * Register the layout chrome on the real DSH `shell.overlay` slot
+ * (kind: list, scope: root). Two additive entries:
+ *   - `team-topbar` → `TeamTopBar` (brand + active-run state pill)
+ *   - `team-footer` → `TeamFooter` (4 counters: ACP / artifacts /
+ *     dispatches / messages)
+ *
+ * `shell.overlay` is a frame-wide floating layer the DSH web shell
+ * reserves for badges, status pills and toasts. Catalog reference:
+ * `cordis-client-runner/src/client/slot-catalog.ts:1437` (additive,
+ * `replaceRisk: 'none'`).
+ *
+ * Each entry is wrapped in `ctx.slots.inject(key, ...)` so the
+ * registration re-runs if the slot owner remounts (per
+ * `client-modules` Cordis notes).
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerLayoutSlot(ctx) {
-  if (!ctx?.slots || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin: ctx.slots unavailable; layout slot registration skipped');
+  if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/layout: ctx.slots.inject unavailable; team-topbar / team-footer skipped');
     return;
   }
-  ctx.effect(() =>
+  ctx.slots.inject('shell.overlay', () =>
     ctx.slots.register({
-      name: 'client-ui-layout',
+      name: 'shell.overlay',
       kind: 'list',
+      id: 'team-topbar',
+      order: 50,
       component: TeamTopBar,
       label: 'DSH Team Top Bar',
     }),
   );
-  ctx.effect(() =>
+  ctx.slots.inject('shell.overlay', () =>
     ctx.slots.register({
-      name: 'client-ui-layout',
+      name: 'shell.overlay',
       kind: 'list',
+      id: 'team-footer',
+      order: 50,
       component: TeamFooter,
       label: 'DSH Team Footer',
-      entryKey: 'dsh-team-footer',
     }),
   );
 }

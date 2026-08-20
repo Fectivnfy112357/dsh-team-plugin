@@ -31,9 +31,25 @@ try {
 }
 console.log('\u9a8c\u8bc1\u5305\uff1a' + name + ' @ ' + root + '\n');
 
+// ---- 0. build the client bundle before any other check ----
+// `lib/client.js` is what DSH's `client-modules` serves to the browser
+// (per the `dsh.client` declaration + `exports["./client"]` in
+// `package.json`); every downstream step (critical paths, syntax
+// check, lib load) needs it on disk. esbuild itself is the only
+// non-stdlib dep; if it is missing, fail loudly so the dev knows to
+// `npm install` rather than getting a stale-bundle surprise later.
+console.log('[0/5] build client bundle');
+const buildCli = spawnSync(process.execPath, [join(root, 'scripts', 'build-client.mjs')], { encoding: 'utf8' });
+if (buildCli.status === 0) {
+  const m = buildCli.stdout.match(/wrote\s+(\S+)\s+\((\d+)\s+bytes/);
+  ok(m ? `built ${m[1]} (${m[2]} bytes)` : buildCli.stdout.trim());
+} else {
+  fail('build-client.mjs failed:\n' + buildCli.stdout + '\n' + buildCli.stderr);
+}
+
 // ---- 1. critical paths ----
-console.log('[1/5] critical paths');
-for (const f of ['package.json', 'plugin.json', 'cordis.patch.yml', 'lib/index.js']) {
+console.log('\n[1/5] critical paths');
+for (const f of ['package.json', 'plugin.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'src/client.js', 'scripts/build-client.mjs']) {
   existsSync(join(root, f)) ? ok(f) : fail('missing: ' + f);
 }
 const skillsDir = join(root, 'skills');
@@ -69,6 +85,14 @@ const NAME_RE = /^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
 NAME_RE.test(name) ? ok('package name matches Agent Plugins 1.0 rules') : fail('package name "' + name + '" violates name rules');
 
 pkg.dsh?.bundle?.patch ? ok('dsh.bundle.patch = ' + pkg.dsh.bundle.patch) : fail('package.json missing dsh.bundle.patch');
+
+pkg.dsh?.client?.platform === 'web'
+  ? ok('dsh.client.platform = "web" (client side declared)')
+  : fail('package.json missing dsh.client.platform: "web" — client side will not be served by DSH client-modules');
+
+pkg.exports?.['./client']
+  ? ok('exports["./client"] declared (= ' + pkg.exports['./client'] + ')')
+  : fail('package.json missing exports["./client"] — client-modules cannot resolve the browser artifact');
 
 Array.isArray(pkg.files) && pkg.files.includes('lib') && pkg.files.includes('skills')
   ? ok('package.json files includes lib + skills')
