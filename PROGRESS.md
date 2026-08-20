@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `aedbd10` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `40fe5fe` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
@@ -27,10 +27,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #1 (部分) | `530af83` | 拍板: parent = exec.agent (option A);三个 subagent-acp entry 进 `cordis.patch.yml`;`MemberService.joinRun` / `leaveRun` 走 `ctx.subagents.startContinuable`;`services/adapters.js#registerAdapters` 改为 verify (不 register);`sendMessage / dispatch / wake / triggerSelfHandoff` 留 2.x | `node scripts/verify.mjs` 5 层绿 · smoke-test 97 → 110 checks |
 | 2.0 #3 | `d381f73` | `lib/index.js` 新增 `createTeamServiceBundle()` + `registerTeamServices(ctx)`;六个 service 模块聚合为一个 frozen 对象,作为 `team` 走 `ctx.provide('team', bundle)`(Cordis `reflect.ts#provide`)挂到 ctx;`apply()` step 3d 调用,effect-wrapped 自动清理;跨插件消费者 `const t = ctx.get('team'); t.members.list(); t.decisions.waitingDecisions(...);` | `node scripts/verify.mjs` 5 层绿 · smoke-test 110 → 120 checks |
 | 审阅收口 #1 | `aedbd10` | `reconcileOnBoot` 补全 per-dispatch mark:扫 dispatch-log,append `terminal=interrupted, reason=process-killed` 到每个 in-flight dispatch 末尾(原 issue 行不动,append-only 语义保留);`requirements.md §5.2/§4.3/§9.10.3` 加 `is_ad_hoc` 字段(schema 漂移修);`§9.7` 重连用语收口;`architecture.md §6.3` 切清 `team.resume` vs `team.rerun`;smoke-test [4/19] 扩 4 个新 check(in-flight 标 interrupted + reason + 已完成不被覆盖 + 原 issue 行保留) | `node scripts/verify.mjs` 5 层绿 · smoke-test 120 → 124 checks |
+| 2.0 #1 留口 (第二批) | `40fe5fe` | `MemberService` 4 个留口方法落地:`sendMessage`(a2a-log + inbox + 轻量 followup);`dispatch`(自动 join if needed + scheduler->member followup + dispatch-log 落 scheduler + context_refs);`wake`(force-wake 无 dedup);`triggerSelfHandoff`(interrupt 旧 child + startContinuable 新 child + session_chain/handoff_files/self_handoff_count append + dispatch-log 落 kind=member-self-handoff);smoke-test [9j] 加 22 个新 check | `node scripts/verify.mjs` 5 层绿 · smoke-test 124 → 146 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 124 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 146 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -45,7 +46,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 20 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1）
+- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -56,18 +57,25 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 ### 2.0 路线 — 1 项 + 3 项留口（按依赖递增）
 
-#### #1 MemberService 真子代理驱动 — 🟡 部分完成 (commit `530af83`)
+#### #1 MemberService 真子代理驱动 — 🟡 部分完成 (commit `530af83` + `40fe5fe`)
 
-**已完成** (本轮):
+**已完成** (第一轮 `530af83`):
 - ✅ 拍板 design 开放项:**parent = exec.agent (option A)**
 - ✅ 拍板 adapter 注册路径:**三个 `@deepseek-ai/dsh-subagent-acp` Cordis 实例通过 `cordis.patch.yml` 声明**,`registerAdapters(ctx)` 改为 verify-and-warn
 - ✅ `joinRun(ctx, runId, memberId, opts)` — 调 `ctx.subagents.startContinuable({ provider, label, request: { parent, prompt, persona? }, signal })` + 写 `session-state.json` (state=running, child_id, provider, label, joined_at, session_chain) + 写 `dispatch-log` (kind=member-join)
 - ✅ `leaveRun(ctx, runId, memberId, opts)` — best-effort `ctx.subagents.interrupt(targetSessionId, authority)` + 写 `session-state.json` (state=terminated, left_at, leave_reason) + 写 `dispatch-log` (kind=member-leave)
 - ✅ Idempotency: joinRun 二次调用返 existing,leaveRun 二次调用 no-op
 
+**已完成** (第二轮 `40fe5fe` — 4 留口方法落地):
+- ✅ `sendMessage(ctx, runId, fromMemberId, msg, opts)` — 走 `MessageService.send` 落 a2a-message-log + 投 inbox,收件人是单个已 join member 时 `ctx.subagents.followup` 推轻量 prompt("你有一条新消息");broadcast 不触发 followup(每个 member 自己读 inbox)
+- ✅ `dispatch(ctx, runId, toMemberId, opts)` — 未 join 自动 joinRun + 已 join 复用,`ctx.subagents.followup` 推 task prompt,dispatch-log 落 `from: scheduler, to: member, context_refs` 单写入者承诺
+- ✅ `wake(ctx, runId, toMemberId, opts)` — force-wake 无 dedup(对比 `MessageService.send` 内的 shouldWake dedup 路径);live child 不存在返 `dispatched: false`
+- ✅ `triggerSelfHandoff(ctx, runId, memberId, opts)` — interrupt 旧 child + startContinuable 新 child + session-state.json 更新(current_session_id 替换、session_chain/handoff_files append、self_handoff_count +1、state 保持 running);dispatch-log 落 `kind: member-self-handoff`
+- ✅ smoke-test [9j] 22 个新 check(124 → 146): 各方法的 entry shape / dispatch-log row / session-state 字段 / no-op 路径 / idempotency / 边界
+
 **留口** (下轮 / 2.x):
-- 🟡 `sendMessage` / `dispatch` / `wake` / `triggerSelfHandoff` —— 全部 4 个方法都是基于 joinRun 的 subagent 转发/调度,等 joinRun 跑稳再接
-- 🟡 flow engine 改造 —— v1.0 round-table / pipeline / fan-out 还是 DSH 侧 handoff 占位 (`signalStepTerminal` / `signalBranchTerminal`),要替换为 MemberService.joinRun + followup 链路
+- 🟡 **flow engine rewiring** —— v1.0 round-table / pipeline / fan-out 还是 DSH 侧 handoff 占位 (`signalStepTerminal` / `signalBranchTerminal`),要替换为 MemberService.joinRun + followup 链路。4 留口方法已就位,这一项是真正接上去的 rewiring 工作;~300 LoC + ~50 smoke-test checks
+- 🟡 2.0 #4 pipeline step handoff → 下一步 dispatch `context_refs` 传播(`§4.7.2` 与 `§4.7.3` 写法不一致,见下条)
 
 **依赖**: 无前置 (独立模块,本轮已闭环核心)
 
@@ -181,11 +189,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 ```
 P1.5-a team-plan slot UI       ✅ commit d478fdd
 P1.5-b 实时 DP 订阅             ✅ commit d478fdd
-2.0 #1 MemberService 真子代理    🟡 commit 530af83 (joinRun/leaveRun 闭环; sendMessage/dispatch/wake/triggerSelfHandoff + flow engine 改造 留 2.x)
+2.0 #1 MemberService 真子代理    🟡 commit 530af83 (joinRun/leaveRun) + ✅ commit 40fe5fe (sendMessage/dispatch/wake/triggerSelfHandoff);剩 flow engine rewiring
 2.0 #3 Cordis Service 注册       ✅ commit d381f73 (frozen bundle on ctx.team via ctx.provide)
 2.0 #5 reconcileOnBoot per-dispatch mark ✅ commit aedbd10 (审阅收口 #1)
 2.0 #6 重跑 interrupted 语义      ✅ 拍板 (commit aedbd10)  team.resume 留口
-2.0 #4 pipeline context_refs    ← 与 #1 留口并行,可独立做
+2.0 #4 pipeline context_refs    ← 与 flow engine rewiring 并行,可独立做
 2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
 ```
 
