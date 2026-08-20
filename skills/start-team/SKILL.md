@@ -1,41 +1,11 @@
 ---
 name: start-team
-description: 当用户表达"组建 / 拉起 / 召集"一组 Agent 一起完成一个相对完整任务时触发。典型触发词：`/start-team`、`/start-team-skill`、`帮我组建一个团队`、`让这几个 agent 一起做`、`多 agent 协作`、`团队跑一下`、`群里讨论下`。本 skill 是 DSH Team 插件的入口薄包装（thin wrapper），把所有 Team Run 的启动参数收集好再调用 `team.start` 插件工具；不实现核心调度逻辑（核心逻辑在 Cordis 插件层 `lib/` `services/` `ui/`）。
-whenToUse: 用户希望按 handoff-round-table / pipeline-with-feedback / fan-out-collect 三种 flow 之一组织多个 Agent 协作完成一个可交付任务。
+description: 当用户希望"组建 / 拉起 / 召集"一组 Agent 协作完成一个相对完整任务时触发。收集启动参数（task / flow / members）后调用 DSH 插件工具 `team.start` 启动一个 Team Run，把 DSH 返回的 runId 回报给用户。覆盖三 flow：`handoff-round-table`（默认，多角色讨论收敛）/ `pipeline-with-feedback`（顺序加工有回路）/ `fan-out-collect`（并行收集→汇总）。**触发**：斜杠命令 `/start-team` 或 `/start-team-skill`；自然语言如 "帮我组建一个团队做 X"、"让 A、B、C 一起讨论 X"、"用 pipeline 跑一下这个需求"、"fan-out 一下这几路并发查"、"召集 brainstormer / critic / synthesizer 三个角色"。**不要触发**：用户只问 DSH 自身问题（走普通对话）、单 agent 任务（不需要团队）、查询 Team 状态（用 `team.list` 工具）、abort Team（用 `team.abort` 工具）。
 ---
 
 # start-team — DSH Team 启动入口
 
-DSH Team 插件把"角色 + 团队"的视角带入 DSH WebUI（详见 [`requirements.md`](../../docs/requirements.md) / [`architecture.md`](../../docs/architecture.md)）。
-
-`start-team` 是**用户启动入口**（需求 §4.1 锁定）：
-
-| 入口 | 触发方式 |
-|---|---|
-| skill（`/start-team`） | 斜杠命令 + 自然语言双触发 |
-| 插件工具 `team.start` | DSH 通过 Cordis 注入；skill 不实现核心能力，只在文档层告诉 agent 怎么调 |
-
-**架构归属**：核心逻辑全部在 **Cordis 插件**（`lib/index.js` 注册入口，`services/` 实现 8 个 Service，`ui/` 实现常驻面板）。本 skill **不**写任何调度/状态机代码，只做"参数收集 + 工具调用 + 结果回报"。
-
-## 何时使用
-
-满足以下任一条件即应触发本 skill：
-
-- 用户显式触发：`/start-team`、`/start-team-skill`、`<team>` 任意别名
-- 用户自然语言：
-  - "帮我组建一个团队做 X"
-  - "让 A、B、C 一起讨论 X"
-  - "用 pipeline 跑一下这个需求"
-  - "fan-out 一下这几路并发查"
-  - "召集 brainstormer / critic / synthesizer 三个角色"
-- 用户在 DSH WebUI 常驻面板**顶部输入框**直接输入 `/start-team <task>`（DSH 把斜杠命令转给本 skill）
-
-**不要**在以下场景触发：
-
-- 用户只是想**问 DSH 自己**一个问题 → 走普通对话，不需要团队
-- 用户要**单 agent 完成**一个任务 → 不需要 start-team
-- 用户说"看一下当前 Team 的状态" → 用 `team.list` 工具，不调本 skill
-- 用户说"停止 / 中断 / abort 当前的 Team" → 直接调 `team.abort(runId, reason)` 工具，不调本 skill
+> 产品形态 / 数据结构详见 [`docs/requirements.md`](../../docs/requirements.md)；Service 接口 / 状态机 / 流程详见 [`docs/architecture.md`](../../docs/architecture.md)。
 
 ## 调用流程
 
@@ -74,9 +44,9 @@ DSH Team 插件把"角色 + 团队"的视角带入 DSH WebUI（详见 [`requirem
 1. **从 `team-template`**：调 `team.list_templates`，给用户看可用模板；用户选一个 → 用模板里的 members
 2. **手动拼队**：从 `members/` 已有素材中挑，或临时新建 member（需要 role_id）
 
-P0 阶段：DSH Team 插件的 member / template 素材库 CRUD 尚未实现（详见 `architecture.md §12` 实施阶段）。此时**只接受从 team-template 启动**；如果 `team-templates/` 为空，向用户报告：
+如果素材库为空，向用户报告：
 
-> "目前 DSH Team 插件的素材库尚未初始化（属于 P0 阶段以外的实施内容）。请先用配置中心创建 role / member / team-template，或改用 DSH 自带的多 agent 能力。"
+> "素材库尚未初始化。请先用配置中心创建 role / member / team-template，或改用 DSH 自带的多 agent 能力。"
 
 ### Step 4 — 调 `team.start` 工具
 
@@ -115,8 +85,7 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 
 按 `requirements.md §4` 用户与 Team 的交互边界：
 
-- **本 skill 是入口**，不实现任何调度 / 状态机 / artifact / 决策点逻辑
-- Team Run 启动后，**用户没有过程性手动介入权**——不要在启动后试图让 agent "插话"
+- Team Run 启动后，**用户没有过程性手动介入权**——不要在启动后试图让 agent 插话
 - 用户唯一的两个主动动作：
   1. **abort**（独立终态，`team.abort` 工具）—— 任意非终态可入
   2. **决策点响应**（`team.respond_decision_point` 工具，flow 触发的门 + ad-hoc 门）—— action ∈ {continue / complete / abort}，可附 feedback
@@ -131,19 +100,3 @@ DSH 通过 Cordis 注入的工具名是 `team.start`（**不是** `start_team` /
 | `team.start` 报 `adapter_not_registered: <name>` | Role 选用了未注册的 adapter | 检查 `architecture.md §10.1` 封闭 adapter 集合（`hermes` / `mcode` / `claude-code`）|
 | 工具调用超时 | DSH 阻塞 / 网络问题 | 重试 1 次；仍失败 → 报告"DSH Team 插件暂不可用" |
 | 用户描述任务含糊（如"帮我优化一下"）| task description 缺关键信息 | 走 Step 1 追问，不要凭印象默认填 |
-
-## 实施状态（P0 骨架）
-
-当前 P0 仅完成 **包结构 + skill 注册**：
-
-- ✅ `package.json` + `plugin.json` + `cordis.patch.yml`（双格式契约）
-- ✅ `lib/index.js`（注册 `start-team` skill 到 `ctx.skills`）
-- ✅ `skills/start-team/SKILL.md`（本文件 — 内容唯一源）
-- ⏳ `team.start` / `team.list` / `team.abort` 插件工具 → P1 实施（`architecture.md §12`）
-- ⏳ TeamService / MemberService / DispatchService / ... → P1 实施
-- ⏳ team-panel / team-config UI Slot → P1 实施
-- ⏳ 启动对账 `reconcileOnBoot` → P0 内交付，绑定 `host/boot` 事件
-
-**当前阶段可跑通**：用户在 DSH 输入 `/start-team`，DSH agent 加载本 skill，但调 `team.start` 会返回"工具未注册"——这是预期，直到 P1 实施完毕。
-
-> 详细阶段划分见 [`architecture.md §12`](../../docs/architecture.md)。
