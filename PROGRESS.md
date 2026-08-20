@@ -1,14 +1,14 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `0ff8f9b` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `a0eb57e` · branch = `main`
 >
-> 本文件是工作进度快照（不是规范/合同）。规范请读 [`requirements.md`](./requirements.md) + [`architecture.md`](./architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
+> 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
 ---
 
 ## 1. v1.0 已闭环
 
-v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 commit + 2 个装机/文档 commit，HEAD 在 main 上。
+v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 commit + 4 个装机/文档/结构 commit，HEAD 在 main 上。
 
 | 阶段 | commit | 范围 | 证据 |
 |---|---|---|---|
@@ -21,6 +21,8 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | P4–P8 | `c1374e5` | PlanService + ArtifactRegistry（跨 Run + 不可变 + 删除保护）+ team.rerun + cost-cap DP + 3 Adapter providers | smoke-test 覆盖 |
 | fix(install) | `8f7c3fe` | 2 处 DSH host 侧真错（`inject: slots` / `output.render`） | `dsh --profile web --port 0` 起来 |
 | docs(agents) | `0ff8f9b` | 装到本地 DSH 步骤 + 2 处 host 侧真错记录进 AGENTS.md | 本仓文档 |
+| docs(structure) | `9cd7965` | 把 `requirements.md` / `architecture.md` / `discussion-log.md` 移到 `docs/` 子目录 + 修正跨文件相对链接 | `node scripts/verify.mjs` 5 层绿 |
+| docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
 
 ### 1.1 验证
 
@@ -37,7 +39,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 12 个 commit 已 push（v1.0 全量）
+- 14 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度）
 - Description 用 `package.json#description` 原文
 
 ---
