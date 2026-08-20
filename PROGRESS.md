@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `a0eb57e` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `d478fdd` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
@@ -23,23 +23,25 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | docs(agents) | `0ff8f9b` | 装到本地 DSH 步骤 + 2 处 host 侧真错记录进 AGENTS.md | 本仓文档 |
 | docs(structure) | `9cd7965` | 把 `requirements.md` / `architecture.md` / `discussion-log.md` 移到 `docs/` 子目录 + 修正跨文件相对链接 | `node scripts/verify.mjs` 5 层绿 |
 | docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
+| P1.5-a / P1.5-b | `d478fdd` | `ui/team-plan.js` 新建 + slot 注册 + DP 实时订阅桥 (`wireDecisionPointBridge` → `team/decision-point-open` / `-respond` 事件总线) + `subscribeDps(ctx, onChange)` helper | `node scripts/verify.mjs` 5 层绿 · smoke-test 84 → 97 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 84 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 97 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
 
 - 装在 `web` profile（`pnpm link`，仓根 → `D:\dsh-plugins\dsh-team-plugin` 的 junction 避开路径空格）
 - `dsh --profile web --port 0` 启动验证过（`http://127.0.0.1:<port>`，stderr 空）
+- 装机后 P1.5-a / P1.5-b 的两个事件（`team-plan` slot + DP 桥）会在 reload 时自然启用，无需重新装机
 
 ### 1.3 远程仓库
 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 14 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度）
+- 15 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -94,26 +96,20 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **依赖**: 顺序在 #1 之后（先有 service 实例，再注册到 ctx），但与 #1 可并行开发（接口形状已知）
 
-### P1.5 路线 — 2 项（独立可做，不依赖 2.0）
+### P1.5 路线 — ✅ 已闭环（commit `d478fdd`）
 
-#### P1.5-a `team-plan` slot UI
+#### P1.5-a `team-plan` slot UI ✅
 
-**Why deferred**: `architecture.md §7.3` 规定了 plan 渲染结构，但 `ui/team-plan.js` 没建。当前 `plan_output=true` 写盘了 plan 但面板无渲染。
+- `ui/team-plan.js` 新建: 接收 `plan` 对象或 `planId` 三态(loading/error/content)
+- slot id: `team-plan`（keyed）已注册到 `lib/index.js`
+- `loadPlan(planId)` helper 导出,host 在 useEffect 里 resolve 后通过 `props.plan` 传入
 
-**目标形态**:
-- 新建 `ui/team-plan.js`
-- slot id: `team-plan`
-- 接收 `planId` props，从 `PlanService.get(planId)` 拿 plan artifact 渲染（content_ref + steps 索引）
-- 在 `lib/index.js` 注册
+#### P1.5-b `team-panel` 实时 DP 订阅 ✅
 
-#### P1.5-b `team-panel` 实时 DP 订阅
-
-**Why deferred**: `decision-point-service.js` 的 `on()` 订阅接口已就绪（`subscribe(observer)` 返回 unsubscribe），`team-panel.js` 没接。当前决策点开启要等用户刷新才看到。
-
-**目标形态**:
-- `team-panel.js` 启动时调 `decisions.on(observer)`
-- observer 收到 DP 变化 → 重渲染对应 `team-decision-badge`
-- plugin unload 时自动 dispose
+- `lib/index.js` 新增 `wireDecisionPointBridge(ctx)` (export),effect-wrapped 在 `apply()` 阶段挂上
+- `DecisionPointService.on('open'|'respond')` → `ctx.emit('team/decision-point-open' | '-respond', dp)`
+- `ui/team-panel.js` 新增 `subscribeDps(ctx, onChange)`: host React 端 useEffect 调用,onChange 收到 `{ runId, kind, action, dp }` 触发重渲染
+- `plugin unload` 时 dispose 自动调用(由 effect 的 disposer 链保证)
 
 ---
 
@@ -147,8 +143,8 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 ## 5. 推进顺序（建议）
 
 ```
-P1.5-a team-plan slot UI       ← 独立,纯 UI,可最先做
-P1.5-b 实时 DP 订阅             ← 独立,纯 UI,可与 P1.5-a 并行
+P1.5-a team-plan slot UI       ✅ commit d478fdd
+P1.5-b 实时 DP 订阅             ✅ commit d478fdd
 2.0 #1 MemberService 真子代理    ← 需先解 parent 解析
 2.0 #3 Cordis Service 注册       ← 独立重构,可与 #1 并行
 2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
