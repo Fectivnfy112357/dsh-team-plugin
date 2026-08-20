@@ -30,12 +30,194 @@
  * @module dsh-team-plugin/member-service
  */
 import { existsSync } from 'node:fs';
-import { readFile, readFile as _readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readFile as _readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getTeamPaths, sessionDir } from './paths.js';
+import { getTeamPaths, sessionDir, ensureDir } from './paths.js';
 import { writeJsonFile, appendLog } from './log-writer.js';
 import { getAdapter, listAdapterIds } from './adapters.js';
 import { send as messageSend } from './message-service.js';
+
+const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * Validate the id format. Same regex as role-service / team-template-service.
+ * @param {string} id
+ */
+function validateId(id) {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error('member-service: id is required');
+  }
+  if (!ID_PATTERN.test(id)) {
+    throw new Error(`member-service: id "${id}" must match ${ID_PATTERN}`);
+  }
+  return id;
+}
+
+/**
+ * Validate a Member object's structural shape. The role_id must
+ * reference a known role on disk (the service scans the global roles
+ * dir). cli_options_override is an object (may be empty). metadata is
+ * an object (may be empty).
+ * @param {unknown} member
+ * @returns {Promise<Member>}
+ */
+async function validateMember(member) {
+  if (!member || typeof member !== 'object') {
+    throw new Error('member-service: member must be an object');
+  }
+  const m = /** @type {Record<string, unknown>} */ (member);
+  if (typeof m.id !== 'string' || m.id.length === 0) {
+    throw new Error('member-service: id is required');
+  }
+  validateId(m.id);
+  if (typeof m.role_id !== 'string' || m.role_id.length === 0) {
+    throw new Error(`member-service: member ${m.id} role_id is required`);
+  }
+  if (typeof m.display_name !== 'string' || m.display_name.length === 0) {
+    throw new Error(`member-service: member ${m.id} display_name is required`);
+  }
+  if (typeof m.persona !== 'string') {
+    throw new Error(`member-service: member ${m.id} persona must be a string`);
+  }
+  if (typeof m.adapter !== 'string' || !_ADAPTER_IDS_FOR_VALIDATE.has(m.adapter)) {
+    throw new Error(
+      `member-service: member ${m.id} adapter "${String(m.adapter)}" must be one of ${[..._ADAPTER_IDS_FOR_VALIDATE].join(', ')}`,
+    );
+  }
+  const co = m.cli_options_override;
+  if (co != null && (typeof co !== 'object' || Array.isArray(co))) {
+    throw new Error(`member-service: member ${m.id} cli_options_override must be an object`);
+  }
+  const md = m.metadata;
+  if (md != null && (typeof md !== 'object' || Array.isArray(md))) {
+    throw new Error(`member-service: member ${m.id} metadata must be an object`);
+  }
+  // Cross-reference: the role_id must exist (defensive — the snapshot
+  // embedded in meta.json takes the role payload at start time, so an
+  // existing role is required for the member to be instantiable).
+  const { get: getRole } = await import('./role-service.js');
+  const role = await getRole(m.role_id);
+  if (!role) {
+    throw new Error(
+      `member-service: member ${m.id} role_id "${m.role_id}" does not exist; create the role first`,
+    );
+  }
+  return /** @type {Member} */ ({
+    id: m.id,
+    role_id: m.role_id,
+    display_name: m.display_name,
+    persona: m.persona,
+    adapter: /** @type {Member['adapter']} */ (m.adapter),
+    cli_options_override: co ? { ...co } : {},
+    metadata: md ? { ...md } : {},
+  });
+}
+
+/** @type {Set<string>} */
+const _ADAPTER_IDS_FOR_VALIDATE = new Set(listAdapterIds());
+
+/**
+ * Persist a Member to disk. Validates shape + cross-references the
+ * role_id. Refuses to overwrite an existing file.
+ * @param {Member | unknown} member
+ * @returns {Promise<Member>}
+ */
+export async function create(member) {
+  const normalised = await validateMember(member);
+  const path = join(getTeamPaths().membersDir, `${normalised.id}.json`);
+  if (existsSync(path)) {
+    throw new Error(`member-service.create: member "${normalised.id}" already exists`);
+  }
+  ensureDir(getTeamPaths().membersDir);
+  await writeJsonFile(path, normalised);
+  return normalised;
+}
+
+/**
+ * Update an existing Member. The id is immutable. cli_options_override
+ * and metadata are replaced (not merged) by the patch.
+ * @param {string} id
+ * @param {Partial<Member>} patch
+ * @returns {Promise<Member>}
+ */
+export async function update(id, patch) {
+  validateId(id);
+  if (!patch || typeof patch !== 'object') {
+    throw new Error(`member-service.update: patch is required for member "${id}"`);
+  }
+  if (patch.id !== undefined && patch.id !== id) {
+    throw new Error(
+      `member-service.update: member id is immutable ("${id}" -> "${patch.id}")`,
+    );
+  }
+  const cur = await get(id);
+  if (!cur) {
+    throw new Error(`member-service.update: member "${id}" not found`);
+  }
+  const next = await validateMember({ ...cur, ...patch, id });
+  const path = join(getTeamPaths().membersDir, `${id}.json`);
+  await writeJsonFile(path, next);
+  return next;
+}
+
+/**
+ * Delete a Member. Refuses when any TeamTemplate references this id
+ * (template.members[].member_id) or when any in-flight run has
+ * `meta.json.members[].member_id` matching this id.
+ *
+ * @param {string} id
+ * @returns {Promise<{ deleted: boolean, refs: number, refSources: string[] }>}
+ */
+export async function remove(id) {
+  validateId(id);
+  const cur = await get(id);
+  if (!cur) return { deleted: false, refs: 0, refSources: [] };
+  const refSources = await findReferencesToMember(id);
+  if (refSources.length > 0) {
+    return { deleted: false, refs: refSources.length, refSources };
+  }
+  const path = join(getTeamPaths().membersDir, `${id}.json`);
+  try {
+    await unlink(path);
+  } catch (e) {
+    if (e?.code !== 'ENOENT') throw e;
+  }
+  return { deleted: true, refs: 0, refSources: [] };
+}
+
+/**
+ * Walk team-templates and team-runs to find anything that references
+ * the given member id. Returns a list of human-readable source
+ * descriptors (e.g. `template:default-team`, `run:run-abc-1234`).
+ * @param {string} memberId
+ * @returns {Promise<string[]>}
+ */
+async function findReferencesToMember(memberId) {
+  const refs = [];
+  try {
+    const { list: listTemplates } = await import('./team-template-service.js');
+    const templates = await listTemplates();
+    for (const t of templates) {
+      if (Array.isArray(t?.members) && t.members.some((m) => m?.member_id === memberId)) {
+        refs.push(`template:${t.id}`);
+      }
+    }
+  } catch { /* template scan is best-effort */ }
+  try {
+    const { list: listRuns } = await import('./team-service.js');
+    const runs = await listRuns({});
+    for (const r of runs) {
+      if (Array.isArray(r?.members) && r.members.some((m) => m?.member_id === memberId)) {
+        refs.push(`run:${r.id}`);
+      }
+    }
+  } catch { /* run scan is best-effort */ }
+  return refs;
+}
+
+/** Test-only reset. Currently a no-op. (The dispatch-seq reset lives at the bottom of this file.) */
+// Note: a real `_resetForTests` exists below (resets the dispatch id
+// counter for tests). We don't shadow it here.
 
 /** @typedef {{
  *   id: string,

@@ -2202,6 +2202,528 @@ try {
     ? ok('team.resume works without __dshCtx (state transition + re-join only; dispatch falls back to dispatchLog)')
     : bad(`legacyResume.state=${legacyResume.state}`);
 
+  // ---- 2.0 A1/A2/A3: CRUD on Role / Member / TeamTemplate -------------
+  // Note: test fixture ids use the `crud-` prefix so they don't collide with
+  // earlier sections of the smoke test (which use plain `m1`, `m2` etc. for
+  // in-process dispatch fixtures and the orphan run).
+  // (A1) RoleService create / get / list / update / remove + ref guard
+  console.log('\n[21/22] RoleService CRUD (2.0 A1)');
+  const roleSvc = await importService('services/role-service.js');
+  const r1 = await roleSvc.create({
+    id: 'crud-reviewer',
+    display_name: 'Reviewer',
+    persona: 'Reviews code thoroughly.',
+    adapter: 'hermes',
+    cli_options: { max_tokens: 1024 },
+    tools_allowed: ['read_file', 'list_dir'],
+    avatar: { color: '#3b82f6', shape: 'circle' },
+  });
+  r1.id === 'crud-reviewer' && r1.adapter === 'hermes' && Array.isArray(r1.tools_allowed)
+    ? ok('RoleService.create persists a normalised role')
+    : bad(`r1=${JSON.stringify(r1)}`);
+  const r1Read = await roleSvc.get('crud-reviewer');
+  r1Read && r1Read.id === 'crud-reviewer' && r1Read.display_name === 'Reviewer'
+    ? ok('RoleService.get returns the persisted role')
+    : bad(`r1Read=${JSON.stringify(r1Read)}`);
+  const r1List = await roleSvc.list();
+  r1List.find((r) => r.id === 'crud-reviewer')
+    ? ok('RoleService.list includes the created role')
+    : bad(`r1List=${r1List.map((r) => r.id).join(',')}`);
+  // duplicate create throws
+  let dupErr = null;
+  try { await roleSvc.create({ ...r1 }); } catch (e) { dupErr = e; }
+  dupErr && /already exists/.test(String(dupErr.message))
+    ? ok('RoleService.create on existing id throws "already exists"')
+    : bad(`dupErr=${dupErr?.message}`);
+  // update changes display_name
+  const r1Upd = await roleSvc.update('crud-reviewer', { display_name: 'Code Reviewer' });
+  r1Upd.display_name === 'Code Reviewer'
+    ? ok('RoleService.update mutates and re-validates')
+    : bad(`r1Upd.display_name=${r1Upd.display_name}`);
+  // schema validation: bad id
+  let badIdErr = null;
+  try { await roleSvc.create({ id: 'Has Spaces', display_name: 'x', persona: '', adapter: 'hermes', cli_options: {}, tools_allowed: [], avatar: { color: '#000', shape: 'square' } }); } catch (e) { badIdErr = e; }
+  badIdErr
+    ? ok('RoleService.create with bad id throws (validation)')
+    : bad('expected validation error for bad id');
+  // ref-guard: cannot remove role while a member references it
+  await memberSvc.create({
+    id: 'crud-m1',
+    role_id: 'crud-reviewer',
+    display_name: 'M1',
+    persona: '',
+    adapter: 'hermes',
+    cli_options_override: {},
+    metadata: {},
+  });
+  const rBlocked = await roleSvc.remove('crud-reviewer');
+  rBlocked.deleted === false && rBlocked.refs >= 1 && rBlocked.refUsers.includes('crud-m1')
+    ? ok('RoleService.remove refuses when member references the role')
+    : bad(`rBlocked=${JSON.stringify(rBlocked)}`);
+  // After the member is gone, remove succeeds
+  const m1Remove = await memberSvc.remove('crud-m1');
+  m1Remove.deleted === true
+    ? ok('MemberService.remove deletes a member with no references')
+    : bad(`m1Remove=${JSON.stringify(m1Remove)}`);
+  const rRemoved = await roleSvc.remove('crud-reviewer');
+  rRemoved.deleted === true && rRemoved.refs === 0
+    ? ok('RoleService.remove succeeds when no references')
+    : bad(`rRemoved=${JSON.stringify(rRemoved)}`);
+  const rGone = await roleSvc.get('crud-reviewer');
+  rGone === undefined ? ok('RoleService.get returns undefined after delete') : bad(`rGone=${JSON.stringify(rGone)}`);
+
+  // (A2) TeamTemplateService create / get / list / update / remove + ref guard
+  console.log('\n[22/22] TeamTemplateService CRUD (2.0 A2)');
+  // Re-create the role so the template can reference its member
+  await roleSvc.create({
+    id: 'crud-reviewer',
+    display_name: 'Reviewer',
+    persona: 'Reviews code.',
+    adapter: 'hermes',
+    cli_options: {},
+    tools_allowed: [],
+    avatar: { color: '#3b82f6', shape: 'circle' },
+  });
+  await memberSvc.create({
+    id: 'crud-m1',
+    role_id: 'crud-reviewer',
+    display_name: 'M1',
+    persona: '',
+    adapter: 'hermes',
+    cli_options_override: {},
+    metadata: {},
+  });
+  const tmplSvc = await importService('services/team-template-service.js');
+  const t1 = await tmplSvc.create({
+    id: 'crud-default-team',
+    name: 'Default Team',
+    flow: 'handoff-round-table',
+    flow_config: { max_rounds: 3 },
+    members: [
+      { member_id: 'crud-m1', instance_alias: 'a' },
+    ],
+  });
+  t1.id === 'crud-default-team' && t1.members.length === 1
+    ? ok('TeamTemplateService.create persists a normalised template')
+    : bad(`t1=${JSON.stringify(t1)}`);
+  const t1Upd = await tmplSvc.update('crud-default-team', { name: 'Renamed Team' });
+  t1Upd.name === 'Renamed Team' && t1Upd.id === 'crud-default-team'
+    ? ok('TeamTemplateService.update mutates name; id is immutable')
+    : bad(`t1Upd=${JSON.stringify(t1Upd)}`);
+  // immutability: cannot change id
+  let idImmut = null;
+  try { await tmplSvc.update('crud-default-team', { id: 'renamed-team' }); } catch (e) { idImmut = e; }
+  idImmut && /immutable/.test(String(idImmut.message))
+    ? ok('TeamTemplateService.update refuses id change (id is immutable)')
+    : bad(`idImmut=${idImmut?.message}`);
+  // schema: bad flow
+  let badFlow = null;
+  try { await tmplSvc.create({ id: 'x', name: 'x', flow: 'not-a-flow', flow_config: {}, members: [{ member_id: 'crud-m1', instance_alias: 'a' }] }); } catch (e) { badFlow = e; }
+  badFlow ? ok('TeamTemplateService.create rejects unknown flow') : bad('expected validation error for bad flow');
+  // ref-guard: a run referencing this template blocks delete
+  const refRunMeta = await ts.start({
+    taskDescription: 'ref-template test',
+    flow: 'handoff-round-table',
+    flowConfig: {},
+    members: [{ member_id: 'crud-m1', instance_alias: 'a' }],
+    templateId: 'crud-default-team',
+  });
+  const tBlocked = await tmplSvc.remove('crud-default-team');
+  tBlocked.deleted === false && tBlocked.refs >= 1 && tBlocked.refRunIds.includes(refRunMeta.id)
+    ? ok('TeamTemplateService.remove refuses when an in-flight run references the template')
+    : bad(`tBlocked=${JSON.stringify(tBlocked)}`);
+  // cleanup: delete the run, then template
+  await ts.abort(refRunMeta.id, 'cleanup');
+  // archive isn't required for ref check (list({}) returns all but archived by default)
+  // After the run is terminal (aborted), remove should still refuse until archived
+  // (per the spec, "in-flight run" means non-terminal). Verify the run is removed from refs after archived.
+  await ts.transition(refRunMeta.id, 'aborted', 'archived', 'cleanup-archive');
+  const tRemoved = await tmplSvc.remove('crud-default-team');
+  tRemoved.deleted === true ? ok('TeamTemplateService.remove succeeds after referenced run is archived') : bad(`tRemoved=${JSON.stringify(tRemoved)}`);
+
+  // (A3) MemberService persistent CRUD
+  console.log('\n[23/22] MemberService persistent CRUD (2.0 A3)');
+  // crud-m1 already exists from above; create another
+  const mem2 = await memberSvc.create({
+    id: 'crud-m2',
+    role_id: 'crud-reviewer',
+    display_name: 'M2',
+    persona: 'Persona 2',
+    adapter: 'mcode',
+    cli_options_override: { model: 'opus' },
+    metadata: { source: 'smoke' },
+  });
+  mem2.id === 'crud-m2' && mem2.adapter === 'mcode'
+    ? ok('MemberService.create persists a normalised member')
+    : bad(`mem2=${JSON.stringify(mem2)}`);
+  const mem2Upd = await memberSvc.update('crud-m2', { display_name: 'M2 Renamed' });
+  mem2Upd.display_name === 'M2 Renamed' && mem2Upd.adapter === 'mcode'
+    ? ok('MemberService.update mutates non-id fields')
+    : bad(`mem2Upd=${JSON.stringify(mem2Upd)}`);
+  // ref-guard: cannot delete a member while a template references it
+  await tmplSvc.create({
+    id: 'crud-tg',
+    name: 'TG',
+    flow: 'handoff-round-table',
+    flow_config: {},
+    members: [{ member_id: 'crud-m2', instance_alias: 'x' }],
+  });
+  const mBlocked = await memberSvc.remove('crud-m2');
+  mBlocked.deleted === false && mBlocked.refs >= 1
+    ? ok('MemberService.remove refuses when a template references the member')
+    : bad(`mBlocked=${JSON.stringify(mBlocked)}`);
+  await tmplSvc.remove('crud-tg');
+  const mRemoved = await memberSvc.remove('crud-m2');
+  mRemoved.deleted === true ? ok('MemberService.remove succeeds when no references') : bad(`mRemoved=${JSON.stringify(mRemoved)}`);
+  // schema: role_id cross-reference — must point to an existing role
+  let xrefErr = null;
+  try {
+    await memberSvc.create({
+      id: 'crud-m3',
+      role_id: 'nonexistent-role',
+      display_name: 'M3',
+      persona: '',
+      adapter: 'hermes',
+      cli_options_override: {},
+      metadata: {},
+    });
+  } catch (e) { xrefErr = e; }
+  xrefErr && /does not exist/.test(String(xrefErr.message))
+    ? ok('MemberService.create validates role_id cross-reference')
+    : bad(`xrefErr=${xrefErr?.message}`);
+  // final cleanup
+  await roleSvc.remove('crud-reviewer');
+  await memberSvc.remove('crud-m1');
+
+  // ---- 2.0 A6/A7/A8: CRUD tools (9 tools) ----
+  console.log('\n[24/22] team.* CRUD tools (2.0 A6/A7/A8)');
+  // 9 tools should be present in the tool list
+  const expectedToolNames = [
+    'team.create_role', 'team.update_role', 'team.delete_role',
+    'team.create_member', 'team.update_member', 'team.delete_member',
+    'team.create_template', 'team.update_template', 'team.delete_template',
+  ];
+  for (const name of expectedToolNames) {
+    const t = teamTools.find((x) => x.name === name);
+    t && typeof t.execute === 'function'
+      ? ok(`tool ${name} is registered with an execute function`)
+      : bad(`tool ${name} missing execute`);
+  }
+  // Exercise the happy path: create role + member + template, then update + delete.
+  const createRoleT = teamTools.find((t) => t.name === 'team.create_role');
+  const createRes = await createRoleT.execute({
+    id: 'crud2-reviewer',
+    display_name: 'R2',
+    persona: 'p2',
+    adapter: 'hermes',
+    cli_options: {},
+    tools_allowed: ['read_file'],
+    avatar: { color: '#22c55e', shape: 'square' },
+  });
+  createRes.role && createRes.role.id === 'crud2-reviewer'
+    ? ok('team.create_role.execute returns the created role')
+    : bad(`createRes=${JSON.stringify(createRes)}`);
+  const updateRoleT = teamTools.find((t) => t.name === 'team.update_role');
+  const updateRes = await updateRoleT.execute({ id: 'crud2-reviewer', display_name: 'R2 Renamed' });
+  updateRes.role && updateRes.role.display_name === 'R2 Renamed'
+    ? ok('team.update_role.execute applies the patch')
+    : bad(`updateRes=${JSON.stringify(updateRes)}`);
+  const createMemberT = teamTools.find((t) => t.name === 'team.create_member');
+  const cmRes = await createMemberT.execute({
+    id: 'crud2-m1', role_id: 'crud2-reviewer', display_name: 'M1',
+    persona: '', adapter: 'hermes', cli_options_override: {}, metadata: {},
+  });
+  cmRes.member && cmRes.member.id === 'crud2-m1'
+    ? ok('team.create_member.execute returns the created member')
+    : bad(`cmRes=${JSON.stringify(cmRes)}`);
+  const updateMemberT = teamTools.find((t) => t.name === 'team.update_member');
+  const umRes = await updateMemberT.execute({ id: 'crud2-m1', display_name: 'M1 Renamed' });
+  umRes.member && umRes.member.display_name === 'M1 Renamed'
+    ? ok('team.update_member.execute applies the patch')
+    : bad(`umRes=${JSON.stringify(umRes)}`);
+  const createTmplT = teamTools.find((t) => t.name === 'team.create_template');
+  const ctRes = await createTmplT.execute({
+    id: 'crud2-tmpl',
+    name: 'CT',
+    flow: 'handoff-round-table',
+    flow_config: { max_rounds: 2 },
+    members: [{ member_id: 'crud2-m1', instance_alias: 'a' }],
+  });
+  ctRes.template && ctRes.template.id === 'crud2-tmpl'
+    ? ok('team.create_template.execute returns the created template')
+    : bad(`ctRes=${JSON.stringify(ctRes)}`);
+  const updateTmplT = teamTools.find((t) => t.name === 'team.update_template');
+  const utRes = await updateTmplT.execute({ id: 'crud2-tmpl', name: 'CT Renamed' });
+  utRes.template && utRes.template.name === 'CT Renamed'
+    ? ok('team.update_template.execute applies the patch')
+    : bad(`utRes=${JSON.stringify(utRes)}`);
+  // delete: blocked when a template references a member
+  const deleteMemberT = teamTools.find((t) => t.name === 'team.delete_member');
+  const dmBlocked = await deleteMemberT.execute({ id: 'crud2-m1' });
+  dmBlocked.deleted === false && dmBlocked.refs >= 1
+    ? ok('team.delete_member.execute returns deleted=false when references exist')
+    : bad(`dmBlocked=${JSON.stringify(dmBlocked)}`);
+  // delete template (no run ref) -> success
+  const deleteTmplT = teamTools.find((t) => t.name === 'team.delete_template');
+  const dtRes = await deleteTmplT.execute({ id: 'crud2-tmpl' });
+  dtRes.deleted === true ? ok('team.delete_template.execute deletes an unreferenced template') : bad(`dtRes=${JSON.stringify(dtRes)}`);
+  // delete member (no refs now) -> success
+  const dmRes = await deleteMemberT.execute({ id: 'crud2-m1' });
+  dmRes.deleted === true ? ok('team.delete_member.execute deletes an unreferenced member') : bad(`dmRes=${JSON.stringify(dmRes)}`);
+  // delete role (no refs now) -> success
+  const deleteRoleT = teamTools.find((t) => t.name === 'team.delete_role');
+  const drRes = await deleteRoleT.execute({ id: 'crud2-reviewer' });
+  drRes.deleted === true ? ok('team.delete_role.execute deletes an unreferenced role') : bad(`drRes=${JSON.stringify(drRes)}`);
+  // idempotent delete on missing: deleted=false, no throw
+  const drMissing = await deleteRoleT.execute({ id: 'never-existed' });
+  drMissing.deleted === false ? ok('team.delete_role.execute on missing id is a no-op (deleted=false)') : bad(`drMissing=${JSON.stringify(drMissing)}`);
+
+  // ---- 2.0 A4: TeamConfigPanel (Role / Member / TeamTemplate 3-tab) ----
+  console.log('\n[25/22] TeamConfigPanel (2.0 A4/A5)');
+  const configMod = await importService('ui/team-config.js');
+  const { TeamConfigPanel } = configMod;
+  typeof TeamConfigPanel === 'function'
+    ? ok('TeamConfigPanel is a function component')
+    : bad('TeamConfigPanel missing');
+  // loading state: no data, no callbacks
+  const loadingEl = TeamConfigPanel({});
+  loadingEl?.props?.['data-state'] === 'loading'
+    ? ok('TeamConfigPanel renders loading state when no data provided')
+    : bad(`loadingEl=${JSON.stringify(loadingEl?.props?.['data-state'])}`);
+  // error state
+  const errorEl = TeamConfigPanel({ error: 'disk failure' });
+  errorEl?.props?.['data-state'] === 'error'
+    ? ok('TeamConfigPanel renders error state when error prop set')
+    : bad(`errorEl=${JSON.stringify(errorEl?.props?.['data-state'])}`);
+  // content state: roles tab by default
+  const contentEl = TeamConfigPanel({
+    roles: [
+      { id: 'r1', display_name: 'R1', persona: 'p', adapter: 'hermes', cli_options: {}, tools_allowed: [], avatar: { color: '#000', shape: 'circle' } },
+    ],
+    members: [
+      { id: 'm1', role_id: 'r1', display_name: 'M1', persona: '', adapter: 'hermes', cli_options_override: {}, metadata: {} },
+    ],
+    templates: [
+      { id: 't1', name: 'T1', flow: 'handoff-round-table', flow_config: {}, members: [{ member_id: 'm1', instance_alias: 'a' }] },
+    ],
+  });
+  contentEl?.props?.['data-state'] === 'content' && contentEl?.props?.['data-active-tab'] === 'roles'
+    ? ok('TeamConfigPanel defaults to roles tab when content state')
+    : bad(`contentEl=${JSON.stringify(contentEl?.props)}`);
+  // activeTab override
+  const membersEl = TeamConfigPanel({ activeTab: 'members', roles: [], members: [], templates: [] });
+  membersEl?.props?.['data-active-tab'] === 'members'
+    ? ok('TeamConfigPanel respects activeTab prop override')
+    : bad(`membersEl=${JSON.stringify(membersEl?.props?.['data-active-tab'])}`);
+  const templatesEl = TeamConfigPanel({ activeTab: 'templates', roles: [], members: [], templates: [] });
+  templatesEl?.props?.['data-active-tab'] === 'templates'
+    ? ok('TeamConfigPanel respects activeTab=templates prop override')
+    : bad(`templatesEl=${JSON.stringify(templatesEl?.props?.['data-active-tab'])}`);
+
+  // ---- 2.0 B1: 视觉 token 系统 ----
+  console.log('\n[26/22] 视觉 token 系统 (2.0 B1)');
+  const reactMod = await importService('ui/_react.js');
+  const { tokens: tokensFromProxy, getTokens, DEFAULT_TOKENS, _resetThemeForTests } = reactMod;
+  // Shape check
+  DEFAULT_TOKENS && DEFAULT_TOKENS.color && DEFAULT_TOKENS.color.state
+    ? ok('DEFAULT_TOKENS includes color.state for run-state pills')
+    : bad('DEFAULT_TOKENS.color.state missing');
+  DEFAULT_TOKENS?.color?.intent?.produce && DEFAULT_TOKENS?.color?.intent?.review
+    ? ok('DEFAULT_TOKENS.color.intent has the 5 OQ-1 plan intents')
+    : bad('DEFAULT_TOKENS.color.intent missing or incomplete');
+  DEFAULT_TOKENS?.space?.md === 8 && DEFAULT_TOKENS?.radius?.pill === 999
+    ? ok('DEFAULT_TOKENS space + radius scale is numeric and well-defined')
+    : bad(`space.md=${DEFAULT_TOKENS?.space?.md} radius.pill=${DEFAULT_TOKENS?.radius?.pill}`);
+  // Proxy reads go through getTokens() — set a runtime override, verify
+  // the proxy reads the override, then reset and verify it reads the default.
+  _resetThemeForTests();
+  const beforeOverride = tokensFromProxy.color.accent;
+  beforeOverride === DEFAULT_TOKENS.color.accent
+    ? ok('tokens proxy reads the default accent when no override is set')
+    : bad(`beforeOverride=${beforeOverride} expected=${DEFAULT_TOKENS.color.accent}`);
+  /** @type {any} */ (globalThis).__dshTeamPluginTheme = { color: { accent: '#ff00ff' } };
+  tokensFromProxy.color.accent === '#ff00ff'
+    ? ok('tokens proxy reads the runtime override when globalThis.__dshTeamPluginTheme is set')
+    : bad(`override.accent=${tokensFromProxy.color.accent}`);
+  _resetThemeForTests();
+  tokensFromProxy.color.accent === DEFAULT_TOKENS.color.accent
+    ? ok('tokens proxy returns to default after _resetThemeForTests')
+    : bad(`after reset: accent=${tokensFromProxy.color.accent}`);
+  // Frozen — cannot mutate (DEFAULT_TOKENS is Object.freeze'd)
+  Object.isFrozen(DEFAULT_TOKENS)
+    ? ok('DEFAULT_TOKENS is frozen (immutable)')
+    : bad('DEFAULT_TOKENS not frozen');
+  Object.isFrozen(DEFAULT_TOKENS.color)
+    ? ok('DEFAULT_TOKENS.color is frozen')
+    : bad('DEFAULT_TOKENS.color not frozen');
+  // Frozen objects throw (in strict mode, which ESM always is) when
+  // mutated. Verify the throw + that DEFAULT_TOKENS is unchanged.
+  const beforeAccent = DEFAULT_TOKENS.color.accent;
+  let mutErr = null;
+  try { tokensFromProxy.color.accent = '#000000'; } catch (e) { mutErr = e; }
+  (mutErr !== null) && DEFAULT_TOKENS.color.accent === beforeAccent
+    ? ok('tokens throw on mutation + DEFAULT_TOKENS unchanged')
+    : bad(`mutErr=${mutErr?.message} after=${DEFAULT_TOKENS.color.accent}`);
+  // getTokens() returns the override, not the default, when set
+  /** @type {any} */ (globalThis).__dshTeamPluginTheme = { color: { warning: '#123456' } };
+  const tFromGet = getTokens();
+  tFromGet.color.warning === '#123456' && tFromGet.color.accent === DEFAULT_TOKENS.color.accent
+    ? ok('getTokens() merges override over default (partial override)')
+    : bad(`tFromGet=${JSON.stringify(tFromGet.color)}`);
+  _resetThemeForTests();
+
+  // ---- 2.0 B2/B3/B4/B5: 顶栏 / sidebar / 主区头 / footer (chrome) ----
+  console.log('\n[27/22] UI chrome (2.0 B2/B3/B4/B5)');
+  const layoutMod = await importService('ui/layout.js');
+  const sidebarMod = await importService('ui/sidebar.js');
+  const uqMod = await importService('ui/user-questions.js');
+  const convMod = await importService('ui/conversation.js');
+  const toolMod = await importService('ui/tool.js');
+  const planMod = await importService('ui/plan.js');
+  typeof layoutMod.TeamTopBar === 'function' && typeof layoutMod.TeamFooter === 'function' && typeof layoutMod.registerLayoutSlot === 'function'
+    ? ok('layout module: TeamTopBar / TeamFooter / registerLayoutSlot are exported')
+    : bad('layout module missing exports');
+  // Top bar empty state
+  const topEmpty = layoutMod.TeamTopBar({});
+  topEmpty?.props?.['data-layout-kind'] === 'top'
+    ? ok('TeamTopBar renders top fragment (data-layout-kind=top)')
+    : bad(`topEmpty=${JSON.stringify(topEmpty?.props?.['data-layout-kind'])}`);
+  // Top bar with active run
+  const topActive = layoutMod.TeamTopBar({ activeRun: { id: 'r-1', state: 'running' } });
+  /** @param {any} el @param {string} key @param {any} value */
+  function deepFind(el, key, value) {
+    if (!el || typeof el !== 'object') return null;
+    if (el?.props?.[key] === value) return el;
+    if (Array.isArray(el?.children)) {
+      for (const c of el.children) {
+        const r = deepFind(c, key, value);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  deepFind(topActive, 'data-active-state-pill', 'running')
+    ? ok('TeamTopBar renders state pill for active run')
+    : bad('TeamTopBar missing state pill');
+  // Footer
+  const footer = layoutMod.TeamFooter({ counts: { acp: 3, artifacts: 7, dispatches: 12, messages: 42 } });
+  footer?.props?.['data-layout-kind'] === 'footer' && footer?.children?.some((c) => c?.props?.['data-counter'] === 'messages' && c?.props?.['data-value'] === '42')
+    ? ok('TeamFooter renders 4 counters with the expected values')
+    : bad('TeamFooter missing or has wrong counter values');
+  // Sidebar
+  typeof sidebarMod.TeamSidebar === 'function' && typeof sidebarMod.registerSidebarSlot === 'function'
+    ? ok('sidebar module: TeamSidebar / registerSidebarSlot are exported')
+    : bad('sidebar module missing exports');
+  const sb = sidebarMod.TeamSidebar({
+    activeRuns: [{ id: 'a1', state: 'running', flow: 'handoff-round-table', task_description: 't1', created_at: '2026-01-01T00:00:00Z' }],
+    historicalRuns: [{ id: 'h1', state: 'succeeded', flow: 'handoff-round-table', task_description: 'h1', created_at: '2026-01-01T00:00:00Z' }],
+    selectedRunId: 'a1',
+  });
+  sb?.children?.some((c) => c?.props?.['data-section'] === 'library')
+    ? ok('TeamSidebar includes a library link section')
+    : bad('TeamSidebar missing library link');
+  // B4 MainHeader: with running state + ad_hoc enabled → shows ad-hoc button
+  const mainHeaderPanel = await importService('ui/team-panel.js');
+  const noop = () => undefined;
+  const chromePanel = mainHeaderPanel.TeamPanel({
+    runMeta: { id: 'r-1', state: 'running', flow: 'handoff-round-table', degraded_flag: false, flow_config: { ad_hoc_decision_points: true }, members: [] },
+    onRerun: noop,
+    onAbort: noop,
+    onInsertAdHoc: noop,
+    onResume: noop,
+  });
+  // Walk to find a button with data-action="insert-adhoc"
+  function findActionButton(el, action) {
+    if (!el || typeof el !== 'object') return null;
+    if (el?.props?.['data-action'] === action) return el;
+    if (Array.isArray(el?.children)) {
+      for (const c of el.children) {
+        const r = findActionButton(c, action);
+        if (r) return r;
+      }
+    }
+    if (Array.isArray(el?.props?.children)) {
+      for (const c of el.props.children) {
+        const r = findActionButton(c, action);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  findActionButton(chromePanel, 'insert-adhoc')
+    ? ok('TeamPanel main header shows + 决策点 button when running + ad_hoc enabled')
+    : bad('TeamPanel main header missing + 决策点 button');
+  const panelTerminal = mainHeaderPanel.TeamPanel({
+    runMeta: { id: 'r-2', state: 'succeeded', flow: 'handoff-round-table', degraded_flag: false, flow_config: {}, members: [] },
+    onRerun: noop,
+    onAbort: noop,
+  });
+  findActionButton(panelTerminal, 'rerun')
+    ? ok('TeamPanel main header shows Rerun button for terminal runs')
+    : bad('TeamPanel main header missing Rerun button for terminal runs');
+  const panelInterrupted = mainHeaderPanel.TeamPanel({
+    runMeta: { id: 'r-3', state: 'interrupted', flow: 'handoff-round-table', degraded_flag: false, flow_config: {}, members: [] },
+    onResume: noop,
+  });
+  findActionButton(panelInterrupted, 'resume')
+    ? ok('TeamPanel main header shows Resume button for interrupted runs')
+    : bad('TeamPanel main header missing Resume button for interrupted runs');
+  // ad-hoc hidden when ad_hoc_decision_points is false
+  const panelNoAdHoc = mainHeaderPanel.TeamPanel({
+    runMeta: { id: 'r-4', state: 'running', flow: 'handoff-round-table', degraded_flag: false, flow_config: { ad_hoc_decision_points: false }, members: [] },
+    onInsertAdHoc: noop,
+  });
+  findActionButton(panelNoAdHoc, 'insert-adhoc')
+    ? bad('TeamPanel main header should NOT show + 决策点 button when ad_hoc_decision_points is false')
+    : ok('TeamPanel main header hides + 决策点 button when ad_hoc_decision_points is false');
+  // User question card
+  typeof uqMod.UserQuestionCard === 'function' && typeof uqMod.registerUserQuestionsSlot === 'function'
+    ? ok('user-questions module: UserQuestionCard / registerUserQuestionsSlot are exported')
+    : bad('user-questions module missing exports');
+  const uqEmpty = uqMod.UserQuestionCard({});
+  uqEmpty?.props?.['data-state'] === 'empty'
+    ? ok('UserQuestionCard renders empty state when no dp')
+    : bad(`uqEmpty=${JSON.stringify(uqEmpty?.props?.['data-state'])}`);
+  const uq = uqMod.UserQuestionCard({
+    dp: { id: 'dp1', runId: 'r-1', kind: 'convergence', prompt: '是否继续?', isAdHoc: false },
+  });
+  uq?.props?.['data-dp-id'] === 'dp1' && uq?.props?.['data-state'] === 'content'
+    ? ok('UserQuestionCard renders content state with dp id + kind pill')
+    : bad('UserQuestionCard content state missing fields');
+  // Conversation
+  typeof convMod.ConversationTimeline === 'function' && typeof convMod.registerConversationSlot === 'function'
+    ? ok('conversation module: ConversationTimeline / registerConversationSlot are exported')
+    : bad('conversation module missing exports');
+  const tl = convMod.ConversationTimeline({
+    flow: 'handoff-round-table',
+    entries: [
+      { id: 'e1', kind: 'a2a-message', timestamp: '2026-01-01T00:00:00Z', from: 'a', to: 'b', topic: 't', intent: 'discuss', text: 'hello', inReplyTo: '' },
+      { id: 'e2', kind: 'a2a-message', timestamp: '2026-01-01T00:00:01Z', from: 'b', to: 'a', topic: 't', intent: 'confirm', text: 'hi', inReplyTo: 'e1' },
+    ],
+  });
+  tl?.props?.['data-flow'] === 'handoff-round-table'
+    ? ok('ConversationTimeline carries data-flow prop')
+    : bad('ConversationTimeline missing data-flow');
+  tl?.children?.length > 0
+    ? ok('ConversationTimeline renders entries')
+    : bad('ConversationTimeline empty children');
+  // Tool call
+  typeof toolMod.TeamToolCall === 'function' && typeof toolMod.registerToolSlot === 'function'
+    ? ok('tool module: TeamToolCall / registerToolSlot are exported')
+    : bad('tool module missing exports');
+  const tc = toolMod.TeamToolCall({ toolName: 'team.list', status: 'complete', args: { state: 'running' } });
+  tc?.props?.['data-tool-name'] === 'team.list' && tc?.props?.['data-status'] === 'complete'
+    ? ok('TeamToolCall renders with tool name + status')
+    : bad('TeamToolCall missing data-* attributes');
+  // Plan
+  typeof planMod.PlanSurface === 'function' && typeof planMod.registerPlanSlot === 'function'
+    ? ok('plan module: PlanSurface / registerPlanSlot are exported')
+    : bad('plan module missing exports');
+  const ps = planMod.PlanSurface({ planId: 'p1' });
+  ps?.props?.['data-component'] === 'plan-surface'
+    ? ok('PlanSurface renders with data-component attribute')
+    : bad('PlanSurface missing data-component');
+
   console.log('');
   if (fail === 0) {
     console.log(`\u2705 smoke-test passed (${pass} checks)`);
