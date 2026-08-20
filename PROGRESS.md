@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `d478fdd` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `530af83` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
@@ -24,10 +24,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | docs(structure) | `9cd7965` | 把 `requirements.md` / `architecture.md` / `discussion-log.md` 移到 `docs/` 子目录 + 修正跨文件相对链接 | `node scripts/verify.mjs` 5 层绿 |
 | docs(progress) | `a0eb57e` | 新增 `PROGRESS.md` 记录 v1.0 → 2.0 进度 + AGENTS.md 索引更新 | `node scripts/verify.mjs` 5 层绿 |
 | P1.5-a / P1.5-b | `d478fdd` | `ui/team-plan.js` 新建 + slot 注册 + DP 实时订阅桥 (`wireDecisionPointBridge` → `team/decision-point-open` / `-respond` 事件总线) + `subscribeDps(ctx, onChange)` helper | `node scripts/verify.mjs` 5 层绿 · smoke-test 84 → 97 checks |
+| 2.0 #1 (部分) | `530af83` | 拍板: parent = exec.agent (option A);三个 subagent-acp entry 进 `cordis.patch.yml`;`MemberService.joinRun` / `leaveRun` 走 `ctx.subagents.startContinuable`;`services/adapters.js#registerAdapters` 改为 verify (不 register);`sendMessage / dispatch / wake / triggerSelfHandoff` 留 2.x | `node scripts/verify.mjs` 5 层绿 · smoke-test 97 → 110 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 97 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 110 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -35,13 +36,14 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - 装在 `web` profile（`pnpm link`，仓根 → `D:\dsh-plugins\dsh-team-plugin` 的 junction 避开路径空格）
 - `dsh --profile web --port 0` 启动验证过（`http://127.0.0.1:<port>`，stderr 空）
 - 装机后 P1.5-a / P1.5-b 的两个事件（`team-plan` slot + DP 桥）会在 reload 时自然启用，无需重新装机
+- 2.0 #1 的 joinRun / leaveRun 真实路径需要 `@deepseek-ai/dsh-subagent-acp` + 三个 adapter CLI（`hermes` / `mcode` / `claude-agent-acp`）一并装到同 profile；`cordis.patch.yml` 已声明三个 entry,DSH host 加载 cordis.yml 时自动起
 
 ### 1.3 远程仓库
 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 15 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b）
+- 16 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -50,28 +52,22 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 按依赖顺序排列，**先做哪个优先**。
 
-### 2.0 路线 — 3 项（按依赖递增）
+### 2.0 路线 — 1 项 + 2 项留口（按依赖递增）
 
-#### #1 MemberService 真子代理驱动
+#### #1 MemberService 真子代理驱动 — 🟡 部分完成 (commit `530af83`)
 
-**Why deferred**: v1.0 `services/member-service.js` 只实现 CRUD（`list` / `get`），`joinRun` / `sendMessage` / `dispatch` / `wake` / `triggerSelfHandoff` 是 JSDoc 合同没真接 `ctx.subagents.startContinuable(...)`。Flow engine 现在跑的是 DSH 侧 handoff 占位（`signalStepTerminal` / `signalBranchTerminal`），Members 还没真起子代理。
+**已完成** (本轮):
+- ✅ 拍板 design 开放项:**parent = exec.agent (option A)**
+- ✅ 拍板 adapter 注册路径:**三个 `@deepseek-ai/dsh-subagent-acp` Cordis 实例通过 `cordis.patch.yml` 声明**,`registerAdapters(ctx)` 改为 verify-and-warn
+- ✅ `joinRun(ctx, runId, memberId, opts)` — 调 `ctx.subagents.startContinuable({ provider, label, request: { parent, prompt, persona? }, signal })` + 写 `session-state.json` (state=running, child_id, provider, label, joined_at, session_chain) + 写 `dispatch-log` (kind=member-join)
+- ✅ `leaveRun(ctx, runId, memberId, opts)` — best-effort `ctx.subagents.interrupt(targetSessionId, authority)` + 写 `session-state.json` (state=terminated, left_at, leave_reason) + 写 `dispatch-log` (kind=member-leave)
+- ✅ Idempotency: joinRun 二次调用返 existing,leaveRun 二次调用 no-op
 
-**接入点**（`subagent/README.zh.md`）:
-- API: `ctx.subagents.startContinuable({ provider, label, ... })` → `{ childId, messageId, handle }`
-- 要求: `ctx.agents`、会话持久化、provider 有 `prepareContinuable` 能力
-- 失败语义: 兑现前失败 → 调用被拒绝、**完全回滚**该子 agent（不返回 id）
+**留口** (下轮 / 2.x):
+- 🟡 `sendMessage` / `dispatch` / `wake` / `triggerSelfHandoff` —— 全部 4 个方法都是基于 joinRun 的 subagent 转发/调度,等 joinRun 跑稳再接
+- 🟡 flow engine 改造 —— v1.0 round-table / pipeline / fan-out 还是 DSH 侧 handoff 占位 (`signalStepTerminal` / `signalBranchTerminal`),要替换为 MemberService.joinRun + followup 链路
 
-**设计开放项**: `startContinuable` 要求 caller 处于"delegating parent"位置。team service 是 static plugin 不是 agent，**parent 怎么解析**待查（`ctx.agents.create()` 起 system agent？还是 DSH 暴露 `ctx.systemAgent`？）。
-
-**当前 `services/adapters.js` 的 stub 错**: `ctx.subagents.registerProvider(def.provider, def)` —— 实际 API 是 `registerProvider(providerObject)`，且 ACP provider 是通过 `import { apply as applyAcp } from '@deepseek-ai/dsh-subagent-acp'` 调三次（providerName 分别为 `acp-hermes` / `acp-mcode` / `acp-claude-code`）。
-
-**目标形态**:
-- `registerAdapters(ctx)`: 真调 `applyAcp` × 3
-- `joinRun(runId, memberId)`: `startContinuable` → 写 `session-state.json`（childId / provider / handle 引用）→ 写 `dispatch-log`
-- `leaveRun(runId, memberId)`: dispose handle + 删 `session-state.json` + 写 `state-history`
-- `sendMessage` / `dispatch` / `wake` / `triggerSelfHandoff`: 等 parent 解析方案定下来再接
-
-**依赖**: 无前置（独立模块）
+**依赖**: 无前置 (独立模块,本轮已闭环核心)
 
 #### #2 跨 Run artifact 反向引用索引
 
@@ -115,7 +111,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 ## 3. 待用户拍板（不是实现任务，是机制/措辞决策）
 
-`requirements.md §11.4` / `architecture.md §11.2` 共 5 条 OQ。v1.0 实现里已经用**倾向值**（tentative defaults）写死了，但措辞上仍 open。
+`requirements.md §11.4` / `architecture.md §11.2` 共 5 条 OQ + 1 条 2.0 拍板记录。v1.0 实现里已经用**倾向值**（tentative defaults）写死了，但措辞上仍 open。
 
 | OQ | 倾向值（已写进实现）| 拍板状态 |
 |---|---|---|
@@ -124,6 +120,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | OQ-3 跨 Run artifact id 内 run 归属段编码格式 | 实现层定（已用 `<run-id>/<artifact-id>`）| open |
 | OQ-4 state-history 必含字段的准确措辞 | 实现已落，措辞用户审 | open |
 | OQ-5 `requirements.md §4` 重写终稿措辞 | 第七轮已对齐收口清单，待最终审 | open |
+| 2.0 #1 parent resolution | `parent = exec.agent` (option A) + adapter 由 cordis.patch.yml 三 entry 声明 | **closed (commit `530af83`)** |
 
 **含义**: 5 OQ 不阻塞 2.0 开发；用户可以随时拍板，对应实现里已用倾向值，改动面小。
 
@@ -145,7 +142,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 ```
 P1.5-a team-plan slot UI       ✅ commit d478fdd
 P1.5-b 实时 DP 订阅             ✅ commit d478fdd
-2.0 #1 MemberService 真子代理    ← 需先解 parent 解析
+2.0 #1 MemberService 真子代理    🟡 commit 530af83 (joinRun/leaveRun 闭环; sendMessage/dispatch/wake/triggerSelfHandoff + flow engine 改造 留 2.x)
 2.0 #3 Cordis Service 注册       ← 独立重构,可与 #1 并行
 2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
 ```
