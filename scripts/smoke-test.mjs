@@ -571,6 +571,100 @@ try {
     ? ok('leaveRun is idempotent: re-leave does not re-interrupt')
     : bad(`leave2=${JSON.stringify(leave2)} interruptCalls=${interruptCalls.length}`);
 
+  // ---- 9i. Cross-plugin service bundle (2.0 #3) ----
+  console.log('\n[9i] Cross-plugin service bundle (2.0 #3)');
+  const { createTeamServiceBundle, registerTeamServices } = await importService('lib/index.js');
+  // createTeamServiceBundle: shape + freezing
+  const bundle = await createTeamServiceBundle();
+  bundle && typeof bundle === 'object'
+    ? ok('createTeamServiceBundle() returns an object')
+    : bad(`bundle=${typeof bundle}`);
+  Object.isFrozen(bundle)
+    ? ok('bundle is frozen (cross-plugin contract)')
+    : bad('bundle is mutable');
+  const expectedKeys = ['team', 'members', 'decisions', 'messages', 'plans', 'artifacts'];
+  const actualKeys = Object.keys(bundle).sort();
+  JSON.stringify(actualKeys) === JSON.stringify([...expectedKeys].sort())
+    ? ok('bundle exposes the 6 expected service keys')
+    : bad(`keys=${JSON.stringify(actualKeys)}`);
+  // Each key resolves to a real ES module namespace (has at least one function)
+  const keyToExpected = {
+    team: ['start', 'list', 'abort'],
+    members: ['list', 'get', 'joinRun', 'leaveRun'],
+    decisions: ['open', 'respond', 'get', 'waitingDecisions'],
+    messages: ['send', 'shouldWake'],
+    plans: ['generate', 'get', 'list'],
+    artifacts: ['register', 'get', 'list', 'refCount', 'canDelete'],
+  };
+  let allKeysResolve = true;
+  for (const [k, fns] of Object.entries(keyToExpected)) {
+    const mod = bundle[k];
+    for (const fn of fns) {
+      if (typeof mod?.[fn] !== 'function') { allKeysResolve = false; break; }
+    }
+    if (!allKeysResolve) break;
+  }
+  allKeysResolve
+    ? ok('each bundle key has all the expected exported functions')
+    : bad('one or more bundle keys missing functions');
+  // registerTeamServices: no-op on a context lacking provide/effect
+  let noopOk = true;
+  const noopDisposer = await registerTeamServices(null);
+  if (typeof noopDisposer !== 'function') noopOk = false;
+  await noopDisposer();
+  const noopDisposerPartial = await registerTeamServices({ logger: { info() {} } });
+  if (typeof noopDisposerPartial !== 'function') noopOk = false;
+  await noopDisposerPartial();
+  noopOk ? ok('registerTeamServices() no-op when ctx lacks provide/effect') : bad('no-op path threw');
+  // registerTeamServices: calls ctx.provide('team', bundle) under ctx.effect
+  const provideCalls = [];
+  const effectCalls = [];
+  const effectDisposers = [];
+  const fakeCtx = {
+    provide(name, value) {
+      provideCalls.push({ name, value });
+      return () => { provideCalls.push({ name, disposed: true }); };
+    },
+    effect(callback, label) {
+      effectCalls.push(label);
+      const disposer = callback();
+      effectDisposers.push(disposer);
+      return () => { effectDisposers.push({ disposed: true }); };
+    },
+    logger: { info() {}, warn() {} },
+  };
+  const realDisposer = await registerTeamServices(fakeCtx);
+  effectCalls.length === 1
+    ? ok('registerTeamServices() wraps registration in ctx.effect')
+    : bad(`effectCalls=${JSON.stringify(effectCalls)}`);
+  // Note: `bundle` (test) and the value passed to ctx.provide (inside the helper)
+  // are two distinct frozen objects because createTeamServiceBundle is called
+  // twice. The contract is shape, not identity — assert by structure.
+  const passedValue = provideCalls[0]?.value;
+  const passedIsObject = passedValue && typeof passedValue === 'object';
+  const passedIsFrozen = passedIsObject && Object.isFrozen(passedValue);
+  const passedKeys = passedIsObject ? Object.keys(passedValue).sort() : [];
+  const passedHasTeamStart = passedIsObject && typeof passedValue.team?.start === 'function';
+  const shapeOk = passedIsObject && passedIsFrozen
+    && JSON.stringify(passedKeys) === JSON.stringify(actualKeys)
+    && passedHasTeamStart;
+  shapeOk
+    ? ok('ctx.provide(\'team\', frozen bundle with 6 keys + team.start) called once')
+    : bad(`shape: object=${passedIsObject} frozen=${passedIsFrozen} keys=${JSON.stringify(passedKeys)} teamHasStart=${passedHasTeamStart}`);
+  typeof realDisposer === 'function'
+    ? ok('registerTeamServices() returns a disposer (no-op; effect owns cleanup)')
+    : bad('registerTeamServices() did not return a function');
+  // registerTeamServices: the in-effect disposer from ctx.provide is captured,
+  // and the outer effect's disposer chain would call it on plugin unload.
+  effectDisposers.length >= 1 && typeof effectDisposers[0] === 'function'
+    ? ok('ctx.effect captured the ctx.provide disposer for unload')
+    : bad(`effectDisposers=${JSON.stringify(effectDisposers.map((d) => typeof d))}`);
+  // Calling the captured disposer removes the registration (simulated)
+  effectDisposers[0]();
+  provideCalls.length === 2 && provideCalls[1].disposed === true
+    ? ok('captured disposer triggers the underlying ctx.provide disposer')
+    : bad(`provideCalls after dispose=${JSON.stringify(provideCalls)}`);
+
   // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
   console.log('\n[10/19] PipelineFlow (happy path)');
   const pipeSvc = await importService('services/pipeline-flow.js');
