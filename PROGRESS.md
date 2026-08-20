@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `4ee5580` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = `5ab83b2` · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 >
@@ -61,6 +61,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - 默认分支: main
 - 23 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs + 2.0 #1 留口 rewiring + P1 #6 team.resume + 2.0 #2 artifact 索引 + P2 抛光 A2A payload + P2 抛光 硬删兜底 + P2 抛光 §10 视觉评估 + 5 OQ close 措辞签字 + **2.0 §2 全 17 项闭环 (A1-A8 + B1-B11)** = `4f3af37`）
 - 24 个 commit 已 push（+ **fix(client+tools): real DSH slots + tool schema DSL** = working tree）—— 把"DSH 客户端没看到 Team 设置入口 + host 端 tool schema 校验不过就 crash"两个**预先就存在**的 bug 一起修了：client 侧补 `lib/client.js` (esbuild 单文件 bundle，浏览器拉得到);`ui/*.js` 的 6 个 chrome slot 注册从 `client-ui-*` 假名切到 `shell.overlay` / `conversation.view` / `sidebar.footer.action` / `tool.call.toolview` 真名;`lib/index.js` 删 host 端死代码 slot 注册;`lib/tools/team-tools.js` 29 个 tool 的 `parameters` 从 `{ type: 'object', required: [...], properties: {...} }` JSON-Schema 形状 改 dsh-tools property-map 形状;`output.schema` 同理去掉 `required` 数组 + 给所有 `type: 'object'` schema 补 `additionalProperties: true`。`node scripts/verify.mjs` 5 层绿 · `node scripts/test-install.mjs` 15/15 过 · host 启动 `dsh web: http://127.0.0.1:<port>` 干净 boot · HTTP 200 · stderr 空
+- 25 个 commit（待 push，**working tree**）—— 修了"装最新版后 `Failed to load plugins: client-modules: bundle /plugins/dsh-team-plugin/client.js?rev=... loaded without registering dsh-team-plugin via __ModuleLoader__.load`"运行时错误：根因是 `lib/client.js` 是 ESM `export { apply, inject }` 形态，但 DSH client-modules 期望 bundle 是 CJS 并立即调 `window.__ModuleLoader__.load({ id, factory: (require) => { ... return module.exports; } })`（tsdown 在 `packages/client/tsdown.client.ts:269-271` 就是这么做的）。`scripts/build-client.mjs` 改 `format: 'esm' → 'cjs'` + 加 banner/footer 包 wrapper (id 从 `package.json#name` 读 = `"dsh-team-plugin"`);`scripts/verify.mjs` 第 0 层加 11 个 client bundle 检查 (6 静态结构断言 + 5 端到端 runtime 烟雾:实际 eval bundle,捕获 `__ModuleLoader__.load` handoff,确认 id / factory / exports = { apply, inject }),从此退化不复发。`node scripts/verify.mjs` 5 层绿 · smoke-test 仍 298 checks · `node scripts/test-install.mjs` 15/15 过 · host 启动干净 boot · HTTP 200 · stderr 空
 - Description 用 `package.json#description` 原文
 
 ---

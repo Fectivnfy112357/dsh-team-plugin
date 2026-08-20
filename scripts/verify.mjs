@@ -47,6 +47,100 @@ if (buildCli.status === 0) {
   fail('build-client.mjs failed:\n' + buildCli.stdout + '\n' + buildCli.stderr);
 }
 
+// Client-bundle structural assertions — guard against the bundle
+// regressing to a plain ESM (which the browser would execute but
+// client-modules would reject with "loaded without registering
+// <id> via __ModuleLoader__.load", a runtime error verify.mjs cannot
+// otherwise catch from a static check). See scripts/build-client.mjs
+// for the CJS + banner/footer contract this asserts.
+{
+  const clientJs = join(root, 'lib', 'client.js');
+  if (existsSync(clientJs)) {
+    const code = readFileSync(clientJs, 'utf8');
+    const head = code.slice(0, 200);
+    const tail = code.slice(-200);
+    /__ModuleLoader__\.load\(\{\s*id:\s*['"]dsh-team-plugin['"]/.test(head)
+      ? ok('lib/client.js calls window.__ModuleLoader__.load with the package id')
+      : fail('lib/client.js is missing the __ModuleLoader__.load wrapper — the browser will reject it as "loaded without registering dsh-team-plugin"');
+    /factory:\s*\(\s*require\s*\)\s*=>\s*\{/.test(code)
+      ? ok('lib/client.js factory signature is (require) => { ... }')
+      : fail('lib/client.js factory body is not the expected CJS form; runtime cannot resolve seed-word require()');
+    /return\s+module\.exports;\s*\}\s*\}\);/.test(tail)
+      ? ok('lib/client.js factory returns module.exports (last statement)')
+      : fail('lib/client.js factory does not return module.exports; the Cordis plugin object never reaches ctx.plugin()');
+    /var\s+module\s*=\s*\{\s*exports:\s*\{\s*\}\s*\}/.test(code)
+      ? ok('lib/client.js initialises var module = { exports: {} } for the CJS body')
+      : fail('lib/client.js does not set up a CJS module.exports; body will throw at script-execution time');
+    // ESM-only markers must NOT appear at the top level — they would
+    // either be syntax errors in a classic script (top-level `import`)
+    // or invisible to the module system (top-level `export`).
+    /^\s*import\s+[^'"]+from\s+/m.test(code)
+      ? fail('lib/client.js still contains a top-level `import` — classic-script execution would SyntaxError before __ModuleLoader__.load fires')
+      : ok('lib/client.js has no top-level `import` (classic-script safe)');
+    /^\s*export\s+\{[^}]*\}\s*;?\s*$/m.test(code)
+      ? fail('lib/client.js still contains a top-level `export { ... }` — the registration never reaches __ModuleLoader__ and client-modules will throw')
+      : ok('lib/client.js has no top-level `export` block (CJS exports go through module.exports)');
+  } else {
+    fail('lib/client.js missing — build did not produce the client artifact');
+  }
+}
+
+// Client-bundle runtime check — actually load the bundle the way
+// client-modules does (classic-script eval against a window sink) and
+// confirm the handoff lands with the right id, a function factory, and
+// exports that include `apply` + `inject`. Catches mistakes the static
+// text checks miss (e.g. a bundle that registers but factory()s to the
+// wrong object).
+{
+  const clientJs = join(root, 'lib', 'client.js');
+  if (existsSync(clientJs)) {
+    try {
+      const code = readFileSync(clientJs, 'utf8');
+      let handoff;
+      // Polyfill window only for the duration of the eval; restore on
+      // exit so the rest of verify is not contaminated.
+      const hadWindow = 'window' in globalThis;
+      globalThis.window = globalThis.window ?? {};
+      const originalSink = globalThis.window.__ModuleLoader__;
+      globalThis.window.__ModuleLoader__ = { load: (h) => { handoff = h } };
+      try {
+        // eslint-disable-next-line no-new-func -- mirrors <script src=...> classic-script eval
+        new Function(code)();
+      } finally {
+        if (hadWindow) {
+          globalThis.window.__ModuleLoader__ = originalSink;
+        } else {
+          delete globalThis.window;
+        }
+      }
+      if (handoff === undefined || handoff === null) {
+        fail('client bundle did not call window.__ModuleLoader__.load when evaluated as a classic script');
+      } else {
+        handoff.id === name
+          ? ok('client bundle registers with id = "' + handoff.id + '" (matches package.json#name)')
+          : fail('client bundle registers with id "' + handoff.id + '" but package.json#name is "' + name + '" — graph row will reject it');
+        typeof handoff.factory === 'function'
+          ? ok('client bundle hands off a function factory')
+          : fail('client bundle hands off a non-function factory (runtime cannot materialize the module)');
+        try {
+          const exports = handoff.factory(() => { throw new Error('unexpected require: this bundle declares no seed-word deps') });
+          const keys = Object.keys(exports ?? {}).sort();
+          keys.includes('apply') && keys.includes('inject')
+            ? ok('client bundle factory returns { apply, inject } (keys = [' + keys.join(', ') + '])')
+            : fail('client bundle factory returns ' + JSON.stringify(keys) + ' — missing apply/inject for ctx.plugin()');
+          typeof exports?.apply === 'function'
+            ? ok('client bundle exports.apply is a function')
+            : fail('client bundle exports.apply is not a function (Cordis cannot activate it)');
+        } catch (e) {
+          fail('client bundle factory threw on invocation: ' + e.message);
+        }
+      }
+    } catch (e) {
+      fail('client bundle runtime check threw: ' + e.message);
+    }
+  }
+}
+
 // ---- 1. critical paths ----
 console.log('\n[1/5] critical paths');
 for (const f of ['package.json', 'plugin.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'src/client.js', 'scripts/build-client.mjs']) {
