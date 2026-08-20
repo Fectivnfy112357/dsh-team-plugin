@@ -340,6 +340,132 @@ try {
     ? ok('TeamPanel empty state shows the hint')
     : bad(`emptyChildren=${emptyChildren}`);
 
+  // 9e) TeamPlan: loading / error / content states (P1.5-a)
+  const { TeamPlan, loadPlan, subscribeDps } = await importService('ui/team-plan.js')
+    .then(async (m) => {
+      // team-plan.js exports TeamPlan + loadPlan; subscribeDps lives on team-panel.js
+      const panelMod = await importService('ui/team-panel.js');
+      return { TeamPlan: m.TeamPlan, loadPlan: m.loadPlan, subscribeDps: panelMod.subscribeDps };
+    });
+  typeof TeamPlan === 'function' ? ok('TeamPlan is a function') : bad('TeamPlan export shape');
+  typeof loadPlan === 'function' ? ok('loadPlan is a function') : bad('loadPlan export shape');
+  // loading state: only planId
+  const planLoading = TeamPlan({ planId: 'plan-test' });
+  planLoading && planLoading.props['data-state'] === 'loading' && /Loading plan/.test(planLoading.props.children)
+    ? ok('TeamPlan shows loading state when plan missing')
+    : bad(`planLoading=${JSON.stringify(planLoading)}`);
+  // error state
+  const planErr = TeamPlan({ planId: 'plan-x', error: 'disk full' });
+  planErr && planErr.props['data-state'] === 'error' && /disk full/.test(planErr.props.children)
+    ? ok('TeamPlan shows error state when error prop set')
+    : bad(`planErr=${JSON.stringify(planErr)}`);
+  // content state
+  const planContent = TeamPlan({
+    plan: {
+      id: 'plan-test', run_id: 'run-x', produced_by: 'scheduler',
+      body: 'plan body content', derived_from: ['user-intervention-log:dp-1'],
+      created_at: '2026-01-01T00:00:00.000Z', produced_in_session: null,
+      steps: [
+        { role: 'writer', intent: 'produce', expected_artifact: { type: 'doc', desc: 'first draft' } },
+        { role: 'editor', intent: 'review', expected_artifact: { type: 'doc', desc: 'reviewed draft' } },
+      ],
+    },
+  });
+  planContent && planContent.props['data-state'] === 'content' && planContent.props['data-step-count'] === '2'
+    ? ok('TeamPlan shows content state with 2 steps')
+    : bad(`planContent state=${planContent?.props?.['data-state']} stepCount=${planContent?.props?.['data-step-count']}`);
+  const stepList = planContent.props.children.find((c) => c?.props?.['data-step-list']);
+  Array.isArray(stepList?.props?.children) && stepList.props.children.length === 2
+    ? ok('TeamPlan renders 2 <li> step elements')
+    : bad(`stepList children=${JSON.stringify(stepList?.props?.children)}`);
+  // intent badge colour
+  const step0 = stepList?.props?.children?.[0];
+  step0?.props?.['data-intent'] === 'produce' && step0?.props?.children?.[1]?.props?.['data-intent-badge'] === 'produce'
+    ? ok('TeamPlan step 0 has data-intent=produce with intent badge')
+    : bad(`step0=${JSON.stringify(step0)}`);
+
+  // 9f) subscribeDps (P1.5-b): onChange fires on ctx emit + dispose works
+  typeof subscribeDps === 'function' ? ok('subscribeDps is a function') : bad('subscribeDps export shape');
+  // Build a minimal mock ctx that records on() + emit()
+  const ctxMock = (() => {
+    const listeners = new Map();
+    return {
+      on(name, handler) {
+        if (!listeners.has(name)) listeners.set(name, new Set());
+        listeners.get(name).add(handler);
+        return () => listeners.get(name)?.delete(handler);
+      },
+      emit(name, payload) {
+        const set = listeners.get(name);
+        if (!set) return;
+        for (const fn of set) fn(payload);
+      },
+      _listeners: listeners,
+    };
+  })();
+  const seen = [];
+  const dispose = subscribeDps(ctxMock, (change) => seen.push(change));
+  ctxMock.emit('team/decision-point-open', { runId: 'run-1', kind: 'convergence', id: 'dp-1' });
+  ctxMock.emit('team/decision-point-respond', { runId: 'run-1', kind: 'convergence', id: 'dp-1' });
+  seen.length === 2 && seen[0].action === 'open' && seen[1].action === 'respond' && seen[0].runId === 'run-1'
+    ? ok('subscribeDps forwards open + respond to onChange')
+    : bad(`seen=${JSON.stringify(seen)}`);
+  // Dispose: subsequent emit should not call onChange
+  dispose();
+  ctxMock.emit('team/decision-point-open', { runId: 'run-1', kind: 'convergence', id: 'dp-2' });
+  seen.length === 2
+    ? ok('subscribeDps dispose() removes listeners')
+    : bad(`seen after dispose=${JSON.stringify(seen)}`);
+
+  // 9g) wireDecisionPointBridge (P1.5-b): real DP open -> ctx emit
+  const { wireDecisionPointBridge } = await importService('lib/index.js');
+  const ctxMock2 = (() => {
+    const listeners = new Map();
+    return {
+      on(name, handler) {
+        if (!listeners.has(name)) listeners.set(name, new Set());
+        listeners.get(name).add(handler);
+        return () => listeners.get(name)?.delete(handler);
+      },
+      emit(name, payload) {
+        const set = listeners.get(name);
+        if (!set) return;
+        for (const fn of set) fn(payload);
+      },
+      logger: { info() {}, warn() {} },
+    };
+  })();
+  // Build a fresh run for the bridge test
+  const bridgeRunMeta = await ts.start({
+    taskDescription: 'bridge test', flow: 'handoff-round-table',
+    flowConfig: { max_rounds: 1 },
+    members: [{ member_id: 'brain', instance_alias: 'b' }],
+  });
+  const bridgeRunId = bridgeRunMeta.id;
+  await ts.markHolder(bridgeRunId);
+  // Capture the next open + respond
+  const captured = [];
+  ctxMock2.on('team/decision-point-open', (dp) => captured.push({ kind: dp.kind, runId: dp.runId, action: 'open' }));
+  ctxMock2.on('team/decision-point-respond', (dp) => captured.push({ kind: dp.kind, runId: dp.runId, action: 'respond' }));
+  // Wire the bridge AFTER the capture listeners (bridge is the producer; capture is the consumer)
+  const bridgeDispose = await wireDecisionPointBridge(ctxMock2);
+  const bridgeDp = await dpSvc.open({ runId: bridgeRunId, kind: 'convergence', prompt: 'ok?' });
+  await dpSvc.respond(bridgeDp.id, { action: 'complete' });
+  captured.length === 2 && captured[0].action === 'open' && captured[1].action === 'respond' && captured[0].runId === bridgeRunId
+    ? ok('wireDecisionPointBridge forwards DP open + respond to ctx')
+    : bad(`captured=${JSON.stringify(captured)}`);
+  // Dispose: subsequent open should NOT trigger ctx emit
+  bridgeDispose();
+  const lenAfterDispose = captured.length;
+  const bridgeDp2 = await dpSvc.open({ runId: bridgeRunId, kind: 'fallback', prompt: 'again?' });
+  captured.length === lenAfterDispose
+    ? ok('bridgeDispose() stops forwarding subsequent DP events')
+    : bad(`captured grew after dispose: ${JSON.stringify(captured)}`);
+  // Sanity: the new DP is real
+  bridgeDp2?.id && bridgeDp2.kind === 'fallback'
+    ? ok('bridge dispose does not affect DP service itself')
+    : bad(`bridgeDp2=${JSON.stringify(bridgeDp2)}`);
+
   // ---- 10. PipelineFlow: 2-step pipeline, both complete -> succeeded ----
   console.log('\n[10/19] PipelineFlow (happy path)');
   const pipeSvc = await importService('services/pipeline-flow.js');

@@ -28,6 +28,39 @@ import { TeamMemberChip } from './team-member-chip.js';
 import { TeamDecisionBadge } from './team-decision-badge.js';
 import { TeamHandoffCard } from './team-handoff-card.js';
 import { TeamHandoffRedo } from './team-handoff-redo.js';
+import { TeamPlan, loadPlan } from './team-plan.js';
+
+// Re-export the plan component + loader so host slots and tests can
+// reach them without re-importing './team-plan.js' (the panel is the
+// single import surface for the lib/index.js slot registration path).
+export { TeamPlan, loadPlan };
+
+/**
+ * Subscribe to live decision-point changes emitted on the ctx event
+ * bus. The host's React tree calls this from a useEffect to keep the
+ * `team-decision-badge` in sync with the registry — see PROGRESS.md
+ * P1.5-b. The plugin side wires DecisionPointService -> ctx events in
+ * `lib/index.js` so this helper just forwards.
+ *
+ * @param {{
+ *   on?: (event: string, handler: (dp: any) => void) => () => void,
+ * }} ctx
+ * @param {(change: { runId: string, kind: string, action: 'open'|'respond', dp: any }) => void} onChange
+ * @returns {() => void} disposer
+ */
+export function subscribeDps(ctx, onChange) {
+  if (!ctx || typeof ctx.on !== 'function') return () => {};
+  const off1 = ctx.on('team/decision-point-open', (dp) => {
+    try { onChange?.({ runId: dp.runId, kind: dp.kind, action: 'open', dp }); } catch { /* listener errors must not break the panel */ }
+  });
+  const off2 = ctx.on('team/decision-point-respond', (dp) => {
+    try { onChange?.({ runId: dp.runId, kind: dp.kind, action: 'respond', dp }); } catch { /* listener errors must not break the panel */ }
+  });
+  return () => {
+    try { off1?.(); } catch { /* disposer errors must not break the panel */ }
+    try { off2?.(); } catch { /* disposer errors must not break the panel */ }
+  };
+}
 
 /**
  * Root panel. Renders the team header (name + flow + status), the member
@@ -140,6 +173,17 @@ export function registerTeamSlots(ctx) {
       kind: 'keyed',
       component: TeamPanel,
       label: 'DSH Team Config',
+    }),
+  );
+  // team-plan slot (keyed): render a single Plan artifact. Hosts
+  // resolve the plan via `loadPlan(planId)` and pass the resolved
+  // object as `props.plan`; the slot only carries the component.
+  ctx.effect(() =>
+    ctx.slots.register({
+      name: 'team-plan',
+      kind: 'keyed',
+      component: TeamPlan,
+      label: 'DSH Team Plan',
     }),
   );
   // settings 入口: DSH 的 settings 页面看到 "Team" 一项
