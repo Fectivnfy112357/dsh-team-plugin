@@ -1,6 +1,6 @@
 # DSH Team 插件 — 进度记录
 
-> 记录时间：2026-08-20 · HEAD = `40fe5fe` · branch = `main`
+> 记录时间：2026-08-20 · HEAD = 待 commit · branch = `main`
 >
 > 本文件是工作进度快照（不是规范/合同）。规范请读 [`docs/requirements.md`](./docs/requirements.md) + [`docs/architecture.md`](./docs/architecture.md)；插件边界/读者请读 [`AGENTS.md`](./AGENTS.md)。
 
@@ -28,10 +28,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 | 2.0 #3 | `d381f73` | `lib/index.js` 新增 `createTeamServiceBundle()` + `registerTeamServices(ctx)`;六个 service 模块聚合为一个 frozen 对象,作为 `team` 走 `ctx.provide('team', bundle)`(Cordis `reflect.ts#provide`)挂到 ctx;`apply()` step 3d 调用,effect-wrapped 自动清理;跨插件消费者 `const t = ctx.get('team'); t.members.list(); t.decisions.waitingDecisions(...);` | `node scripts/verify.mjs` 5 层绿 · smoke-test 110 → 120 checks |
 | 审阅收口 #1 | `aedbd10` | `reconcileOnBoot` 补全 per-dispatch mark:扫 dispatch-log,append `terminal=interrupted, reason=process-killed` 到每个 in-flight dispatch 末尾(原 issue 行不动,append-only 语义保留);`requirements.md §5.2/§4.3/§9.10.3` 加 `is_ad_hoc` 字段(schema 漂移修);`§9.7` 重连用语收口;`architecture.md §6.3` 切清 `team.resume` vs `team.rerun`;smoke-test [4/19] 扩 4 个新 check(in-flight 标 interrupted + reason + 已完成不被覆盖 + 原 issue 行保留) | `node scripts/verify.mjs` 5 层绿 · smoke-test 120 → 124 checks |
 | 2.0 #1 留口 (第二批) | `40fe5fe` | `MemberService` 4 个留口方法落地:`sendMessage`(a2a-log + inbox + 轻量 followup);`dispatch`(自动 join if needed + scheduler->member followup + dispatch-log 落 scheduler + context_refs);`wake`(force-wake 无 dedup);`triggerSelfHandoff`(interrupt 旧 child + startContinuable 新 child + session_chain/handoff_files/self_handoff_count append + dispatch-log 落 kind=member-self-handoff);smoke-test [9j] 加 22 个新 check | `node scripts/verify.mjs` 5 层绿 · smoke-test 124 → 146 checks |
+| 2.0 #4 | (待 commit) | pipeline-with-feedback 跨步 `context_refs` 自动传播:`runPipeline` 维护 `stepOutputs[i] = { produced_artifact_ids }` in-memory map,派下一步时按优先级 (1) `step.context_refs` (2) `flow_config.context_refs_override[i]` (3) 派生自 `stepOutputs[i-1]` 三层 fallback;feedback retry 路径取最终 attempt 的产物;smoke-test [12b/19] 加 8 个新 check (auto-derive / step override / flow override / feedback retry / 隔离 / reset);导出 `_resetStepOutputsForTests(runId)` | `node scripts/verify.mjs` 5 层绿 · smoke-test 146 → 154 checks |
 
 ### 1.1 验证
 
-- `node scripts/verify.mjs` — 5 层 + 146 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
+- `node scripts/verify.mjs` — 5 层 + 154 烟雾，**独立于 DSH** 跑（不依赖装到 DSH）
 - 预期输出：`✅ verify passed (0 warnings, 0 errors)`
 
 ### 1.2 装机状态
@@ -46,7 +47,7 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 - URL: https://github.com/Fectivnfy112357/dsh-team-plugin
 - 可见性: public
 - 默认分支: main
-- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批）
+- 21 个 commit 已 push（v1.0 全量 + 2 个文档结构/进度 + P1.5-a/P1.5-b + 2.0 #1 拍板 + joinRun/leaveRun + 2.0 #3 service bundle + 1 个 build 杂项 + 审阅收口 #1 + 2.0 #1 留口第二批 + 2.0 #4 pipeline context_refs）
 - Description 用 `package.json#description` 原文
 
 ---
@@ -75,7 +76,6 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **留口** (下轮 / 2.x):
 - 🟡 **flow engine rewiring** —— v1.0 round-table / pipeline / fan-out 还是 DSH 侧 handoff 占位 (`signalStepTerminal` / `signalBranchTerminal`),要替换为 MemberService.joinRun + followup 链路。4 留口方法已就位,这一项是真正接上去的 rewiring 工作;~300 LoC + ~50 smoke-test checks
-- 🟡 2.0 #4 pipeline step handoff → 下一步 dispatch `context_refs` 传播(`§4.7.2` 与 `§4.7.3` 写法不一致,见下条)
 
 **依赖**: 无前置 (独立模块,本轮已闭环核心)
 
@@ -108,11 +108,11 @@ v1.0 实现路线 `architecture.md §12` 的 P0–P8 全部完成。9 个功能 
 
 **Why deferred**: v1.0 `services/pipeline-flow.js#runPipeline` 在 `signalStepTerminal` 收 `produced_artifact_ids` 后**没**自动带入下一步 dispatch 的 `context_refs`;`§4.7.2` 流程图也只写「查 plan 后派单」未明文规定 context 传递语义。fan-out §4.7.3 已经显式写了 `aggregator context_refs = completed_members.artifacts`,pipeline 写法不一致,产物跨步传递不显式。
 
-**目标形态**:
-- `services/pipeline-flow.js` 在收 `signalStepTerminal(runId, stepIndex, 'complete', { produced_artifact_ids })` 后,记到 in-memory step registry(`Map<runId, stepOutputs[]>`)
-- 派下一步 dispatch 时 `context_refs` 默认从 `stepOutputs[i-1].produced_artifact_ids` 派生(可被 `flow_config.context_refs_override` 显式覆盖)
-- `signalStepTerminal(..., 'fail', { feedback })` 走的 feedback loop retry 时,**不**自动带前步的 produced_artifact_ids(retry 是同 member 同 task,前步产物自然有);由 retry 路径自己拼 feedback
-- smoke-test 加: 2-step pipeline,step 0 产 `a-1`,step 1 dispatch.context_refs 应含 `a-1`(以及 step 0 的 `inbox`);可加 1 个 override 路径的 case
+**已完成** (本轮):
+- ✅ `services/pipeline-flow.js#runPipeline` 维护 in-memory `stepOutputs[stepIndex] = { produced_artifact_ids }`(`Map<runId, Array<{...}>>`);feedback retry 路径取最终 attempt 的产物(覆盖式写)
+- ✅ 派下一步时按优先级解析 `context_refs`:(1) `step.context_refs` 静态覆盖 → (2) `flow_config.context_refs_override[stepIndex]` flow 覆盖 → (3) 派生自 `stepOutputs[i-1].produced_artifact_ids`(空数组 / 缺失时降级为 `[]`)
+- ✅ smoke-test [12b/19] 加 8 个新 check:auto-derive (3-step + multi-artifact)/ step-level override / flow-level override / feedback retry 取最终产物 / 空产物边界 / 跨 run 隔离 / `_resetForTests` 清空
+- ✅ 导出 `_resetStepOutputsForTests(runId)`(备 2.x cold-resume 场景)
 
 **依赖**: 不依赖 #1 留口(`signalStepTerminal` 协议不动,只补内部 state 派生);与 #1 留口并行开发 OK
 
@@ -193,7 +193,7 @@ P1.5-b 实时 DP 订阅             ✅ commit d478fdd
 2.0 #3 Cordis Service 注册       ✅ commit d381f73 (frozen bundle on ctx.team via ctx.provide)
 2.0 #5 reconcileOnBoot per-dispatch mark ✅ commit aedbd10 (审阅收口 #1)
 2.0 #6 重跑 interrupted 语义      ✅ 拍板 (commit aedbd10)  team.resume 留口
-2.0 #4 pipeline context_refs    ← 与 flow engine rewiring 并行,可独立做
+2.0 #4 pipeline context_refs    ✅ (本轮 commit)
 2.0 #2 跨 Run artifact 索引     ← 独立优化,最后做
 ```
 

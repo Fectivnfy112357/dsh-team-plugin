@@ -16,6 +16,14 @@
  *   - in-memory step waiter Promise;DSH 进程是唯一持有者
  *   - feedback loop: 重派同 target + 上一轮 feedback
  *
+ * v2.0 #4 (this revision):
+ *   - step → next-step `context_refs` 自动传播:记 `stepOutputs[i]`,
+ *     派下一步时默认从 `stepOutputs[i-1].produced_artifact_ids` 派生
+ *   - `flow_config.context_refs_override[stepIndex]` 显式覆盖(可选)
+ *   - `step.context_refs` 也保留为静态覆盖入口,与 override 等价优先级
+ *   - feedback retry 路径**不**自动带前步 produced_artifact_ids(同 member
+ *     同 task,前步产物自然有)
+ *
  * @module dsh-team-plugin/pipeline-flow
  */
 import { readMeta, transition, writeMeta } from './team-service.js';
@@ -34,6 +42,51 @@ import { open as openDp, get as getDp } from './decision-point-service.js';
 
 /** @type {Map<string, { resolve: (v: any) => void, reject: (e: any) => void, currentStep: number }>} */
 const _stepWaiters = new Map();
+
+/** v2.0 #4: in-memory record of each step's last terminal output, keyed by runId.
+ * Used to auto-derive `context_refs` for the next step's dispatch.
+ * Entries are populated when a step's `signalStepTerminal` returns 'complete'
+ * (after retries, the latest attempt's artifacts are kept). The shape is
+ * `{ produced_artifact_ids: string[] }[]` indexed by step index.
+ * Cleared on `_resetForTests()` and never persisted (DSH is the in-process
+ * holder; cold-resume reconstructs the chain from dispatch-log markTerminal
+ * rows in 2.x).
+ * @type {Map<string, Array<{ produced_artifact_ids: string[] }>>} */
+const _stepOutputs = new Map();
+
+/** Get or create the per-run step output array. @param {string} runId */
+function getStepOutputs(runId) {
+  let arr = _stepOutputs.get(runId);
+  if (!arr) {
+    arr = [];
+    _stepOutputs.set(runId, arr);
+  }
+  return arr;
+}
+
+/** Reset the per-run step output array (called when a run reaches terminal
+ * or when the engine is torn down). @param {string} runId */
+export function _resetStepOutputsForTests(runId) {
+  _stepOutputs.delete(runId);
+}
+
+/** v2.0 #4: derive the default `context_refs` for a given step.
+ * - step 0: empty
+ * - step N > 0: previous step's `produced_artifact_ids` from the latest
+ *   terminal 'complete' (i.e. the last successful attempt after retries)
+ * - run not in registry (e.g. test called without going through runPipeline):
+ *   fall back to empty
+ * @param {string} runId
+ * @param {number} stepIndex
+ * @returns {string[]}
+ */
+function getDefaultContextRefs(runId, stepIndex) {
+  if (stepIndex <= 0) return [];
+  const outputs = _stepOutputs.get(runId);
+  if (!outputs) return [];
+  const prev = outputs[stepIndex - 1];
+  return Array.isArray(prev?.produced_artifact_ids) ? [...prev.produced_artifact_ids] : [];
+}
 
 /**
  * Signal a step's terminal state from the DSH. Used by
@@ -106,6 +159,23 @@ export async function runPipeline(runId, initialMeta, ctx) {
     // Bump current_step in meta
     await writeMeta(runId, { ...meta, current_step: i });
 
+    // v2.0 #4: compute the effective `context_refs` for this step's dispatch.
+    // Precedence (highest first):
+    //   1. `flow_config.context_refs_override[i]` — flow-level explicit
+    //   2. `step.context_refs` — step-level static (v1.0 compat)
+    //   3. derived from `stepOutputs[i-1].produced_artifact_ids` — auto
+    // The override + static both win over auto-derivation; between override
+    // and static, the step-level wins (the more local declaration).
+    const override = (initialMeta.flow_config?.context_refs_override ?? {})[i];
+    let stepContextRefs;
+    if (Array.isArray(step.context_refs) && step.context_refs.length > 0) {
+      stepContextRefs = step.context_refs;
+    } else if (Array.isArray(override) && override.length > 0) {
+      stepContextRefs = override;
+    } else {
+      stepContextRefs = getDefaultContextRefs(runId, i);
+    }
+
     // Check for an explicit ad-hoc DP at step boundary (if decision_points
     // configured for this index)
     const dpAtBoundary = (initialMeta.flow_config?.decision_points ?? []).find(
@@ -153,12 +223,14 @@ export async function runPipeline(runId, initialMeta, ctx) {
         reason: 'step-start',
         seq: i + 1,
       });
-      // DSH -> member dispatch (the actual work)
+      // DSH -> member dispatch (the actual work). v2.0 #4: pass the
+      // derived/step-level `stepContextRefs` so cross-step propagation
+      // works without the caller having to plumb artifacts manually.
       const dispatched = await dispatchLog({
         run_id: runId,
         to: step.member_id,
         task: feedback ? `${step.task}\n\nFeedback from prior attempt: ${feedback}` : step.task,
-        context_refs: step.context_refs ?? [],
+        context_refs: stepContextRefs,
         seq: i + 1,
       });
       dispatchResult = dispatched;
@@ -169,6 +241,12 @@ export async function runPipeline(runId, initialMeta, ctx) {
         await markDispatchTerminal(runId, dispatchResult.id, 'completed', {
           produced_artifact_ids: sig.produced_artifact_ids,
         });
+        // v2.0 #4: remember this step's output for downstream propagation.
+        // Feedback retry path lands here too — only the last successful
+        // attempt's artifacts are kept (replaces any earlier record).
+        getStepOutputs(runId)[i] = {
+          produced_artifact_ids: Array.isArray(sig.produced_artifact_ids) ? [...sig.produced_artifact_ids] : [],
+        };
         // member -> DSH-routing: completion handoff
         await handoffLog({
           run_id: runId,
@@ -240,4 +318,5 @@ async function runPipelineFailed(runId, reason) {
 export function _resetForTests() {
   _stepWaiters.clear();
   _pendingSignals.clear();
+  _stepOutputs.clear();
 }

@@ -1024,6 +1024,221 @@ try {
   const noFinalMeta = await ts.readMeta(noRunId);
   noFinalMeta.state === 'failed' ? ok('no-retry meta.state=failed') : bad(`state=${noFinalMeta.state}`);
 
+  // ---- 12b. PipelineFlow: 2.0 #4 context_refs propagation ----
+  console.log('\n[12b/19] PipelineFlow (2.0 #4 context_refs propagation)');
+  pipeSvc._resetForTests();
+  // 3-step pipeline: step 0 produces [a-1], step 1's dispatch should auto-include [a-1];
+  // step 1 produces [a-2,a-3], step 2's dispatch should auto-include [a-2,a-3].
+  const crMeta = await ts.start({
+    taskDescription: 'pipeline context_refs test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write v1', intent: 'produce' },
+        { member_id: 'editor', task: 'edit v1', intent: 'review' },
+        { member_id: 'publisher', task: 'publish final', intent: 'produce' },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+      { member_id: 'publisher', instance_alias: 'p' },
+    ],
+  });
+  const crRunId = crMeta.id;
+  await ts.markHolder(crRunId);
+  await ts.transition(crRunId, 'pending', 'assembling', 'team-formed');
+  const crPromise = flowSvc.run(crRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  // step 0 complete with [a-1]
+  pipeSvc.signalStepTerminal(crRunId, 0, 'complete', { produced_artifact_ids: ['a-1'] });
+  await new Promise((r) => setTimeout(r, 50));
+  // step 1: read dispatch-log to verify context_refs auto-derived
+  const crDl = readFileSync(join(paths.teamRunsDir, crRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const editorDispatch = crDl.find((r) => r.to === 'editor' && r.task === 'edit v1');
+  editorDispatch && JSON.stringify(editorDispatch.context_refs) === JSON.stringify(['a-1'])
+    ? ok('step 1 dispatch.context_refs auto-derives from step 0 produced_artifact_ids')
+    : bad(`editorDispatch=${JSON.stringify(editorDispatch)}`);
+  // step 1 complete with [a-2, a-3]
+  pipeSvc.signalStepTerminal(crRunId, 1, 'complete', { produced_artifact_ids: ['a-2', 'a-3'] });
+  await new Promise((r) => setTimeout(r, 50));
+  // step 2: read dispatch-log to verify [a-2, a-3]
+  const crDl2 = readFileSync(join(paths.teamRunsDir, crRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const publisherDispatch = crDl2.find((r) => r.to === 'publisher' && r.task === 'publish final');
+  publisherDispatch && JSON.stringify(publisherDispatch.context_refs) === JSON.stringify(['a-2', 'a-3'])
+    ? ok('step 2 dispatch.context_refs auto-derives from step 1 produced_artifact_ids (multi-artifact)')
+    : bad(`publisherDispatch=${JSON.stringify(publisherDispatch)}`);
+  // step 2 complete -> succeeded
+  pipeSvc.signalStepTerminal(crRunId, 2, 'complete', { produced_artifact_ids: ['final'] });
+  const crResult = await crPromise;
+  crResult.terminal === 'succeeded' ? ok('3-step auto-propagation pipeline -> succeeded') : bad(`terminal=${crResult.terminal}`);
+
+  // Override: step.context_refs takes precedence over derived
+  pipeSvc._resetForTests();
+  const ovMeta = await ts.start({
+    taskDescription: 'context_refs override test (step-level)',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write v1', intent: 'produce' },
+        { member_id: 'editor', task: 'edit v1', intent: 'review', context_refs: ['manual-1', 'manual-2'] },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const ovRunId = ovMeta.id;
+  await ts.markHolder(ovRunId);
+  await ts.transition(ovRunId, 'pending', 'assembling', 'team-formed');
+  const ovPromise = flowSvc.run(ovRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  pipeSvc.signalStepTerminal(ovRunId, 0, 'complete', { produced_artifact_ids: ['derived-art'] });
+  await new Promise((r) => setTimeout(r, 50));
+  const ovDl = readFileSync(join(paths.teamRunsDir, ovRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const ovEditor = ovDl.find((r) => r.to === 'editor' && r.task === 'edit v1');
+  ovEditor && JSON.stringify(ovEditor.context_refs) === JSON.stringify(['manual-1', 'manual-2'])
+    ? ok('step.context_refs overrides the auto-derived context_refs')
+    : bad(`ovEditor=${JSON.stringify(ovEditor)}`);
+  pipeSvc.signalStepTerminal(ovRunId, 1, 'complete', { produced_artifact_ids: ['edited'] });
+  await ovPromise;
+
+  // Override: flow_config.context_refs_override[stepIndex]
+  pipeSvc._resetForTests();
+  const fovMeta = await ts.start({
+    taskDescription: 'context_refs override test (flow-level)',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write v1', intent: 'produce' },
+        { member_id: 'editor', task: 'edit v1', intent: 'review' },
+      ],
+      context_refs_override: {
+        1: ['flow-override-1'],
+      },
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const fovRunId = fovMeta.id;
+  await ts.markHolder(fovRunId);
+  await ts.transition(fovRunId, 'pending', 'assembling', 'team-formed');
+  const fovPromise = flowSvc.run(fovRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  pipeSvc.signalStepTerminal(fovRunId, 0, 'complete', { produced_artifact_ids: ['derived-art'] });
+  await new Promise((r) => setTimeout(r, 50));
+  const fovDl = readFileSync(join(paths.teamRunsDir, fovRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const fovEditor = fovDl.find((r) => r.to === 'editor' && r.task === 'edit v1');
+  fovEditor && JSON.stringify(fovEditor.context_refs) === JSON.stringify(['flow-override-1'])
+    ? ok('flow_config.context_refs_override[1] overrides auto-derived context_refs')
+    : bad(`fovEditor=${JSON.stringify(fovEditor)}`);
+  pipeSvc.signalStepTerminal(fovRunId, 1, 'complete', { produced_artifact_ids: ['edited'] });
+  await fovPromise;
+
+  // Feedback retry: step 0 fails then succeeds with different artifacts; step 1
+  // should derive from the FINAL attempt's produced_artifact_ids (not the
+  // would-have-been empty list from a hypothetical first-attempt record).
+  pipeSvc._resetForTests();
+  const frMeta = await ts.start({
+    taskDescription: 'context_refs feedback-retry test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write', intent: 'produce', max_retries: 1 },
+        { member_id: 'editor', task: 'edit', intent: 'review' },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const frRunId = frMeta.id;
+  await ts.markHolder(frRunId);
+  await ts.transition(frRunId, 'pending', 'assembling', 'team-formed');
+  const frPromise = flowSvc.run(frRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  pipeSvc.signalStepTerminal(frRunId, 0, 'fail', { feedback: 'add more detail' });
+  await new Promise((r) => setTimeout(r, 50));
+  pipeSvc.signalStepTerminal(frRunId, 0, 'complete', { produced_artifact_ids: ['retry-art'] });
+  await new Promise((r) => setTimeout(r, 50));
+  const frDl = readFileSync(join(paths.teamRunsDir, frRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const frEditor = frDl.find((r) => r.to === 'editor' && r.task === 'edit');
+  frEditor && JSON.stringify(frEditor.context_refs) === JSON.stringify(['retry-art'])
+    ? ok('context_refs derives from the FINAL successful attempt (after feedback retry)')
+    : bad(`frEditor=${JSON.stringify(frEditor)}`);
+  pipeSvc.signalStepTerminal(frRunId, 1, 'complete', { produced_artifact_ids: ['edited-retry'] });
+  await frPromise;
+
+  // Per-run isolation: _stepOutputs cleared by _resetForTests, and a fresh
+  // run starts with no prior step outputs
+  pipeSvc._resetForTests();
+  const isoMeta = await ts.start({
+    taskDescription: 'context_refs isolation test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write fresh', intent: 'produce' },
+        { member_id: 'editor', task: 'edit fresh', intent: 'review' },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const isoRunId = isoMeta.id;
+  await ts.markHolder(isoRunId);
+  await ts.transition(isoRunId, 'pending', 'assembling', 'team-formed');
+  // step 0 produces no artifacts (undefined -> empty array)
+  const isoPromise = flowSvc.run(isoRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  pipeSvc.signalStepTerminal(isoRunId, 0, 'complete', { produced_artifact_ids: [] });
+  await new Promise((r) => setTimeout(r, 50));
+  const isoDl = readFileSync(join(paths.teamRunsDir, isoRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const isoEditor = isoDl.find((r) => r.to === 'editor' && r.task === 'edit fresh');
+  Array.isArray(isoEditor?.context_refs) && isoEditor.context_refs.length === 0
+    ? ok('step 1 context_refs is empty when step 0 produced no artifacts (clean per-run state)')
+    : bad(`isoEditor=${JSON.stringify(isoEditor)}`);
+  pipeSvc.signalStepTerminal(isoRunId, 1, 'complete', { produced_artifact_ids: ['done'] });
+  await isoPromise;
+
+  // _resetForTests clears stepOutputs
+  pipeSvc._resetForTests();
+  // After reset, a fresh run's step 1 should NOT see a previous run's outputs
+  const cleanMeta = await ts.start({
+    taskDescription: 'context_refs post-reset test',
+    flow: 'pipeline-with-feedback',
+    flowConfig: {
+      steps: [
+        { member_id: 'writer', task: 'write', intent: 'produce' },
+        { member_id: 'editor', task: 'edit', intent: 'review' },
+      ],
+    },
+    members: [
+      { member_id: 'writer', instance_alias: 'w' },
+      { member_id: 'editor', instance_alias: 'e' },
+    ],
+  });
+  const cleanRunId = cleanMeta.id;
+  await ts.markHolder(cleanRunId);
+  await ts.transition(cleanRunId, 'pending', 'assembling', 'team-formed');
+  const cleanPromise = flowSvc.run(cleanRunId, null);
+  await new Promise((r) => setTimeout(r, 100));
+  // Skip step 0's complete, manually complete step 0 with a known artifact
+  pipeSvc.signalStepTerminal(cleanRunId, 0, 'complete', { produced_artifact_ids: ['fresh-art'] });
+  await new Promise((r) => setTimeout(r, 50));
+  const cleanDl = readFileSync(join(paths.teamRunsDir, cleanRunId, 'dispatch-log.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+  const cleanEditor = cleanDl.find((r) => r.to === 'editor' && r.task === 'edit');
+  cleanEditor && JSON.stringify(cleanEditor.context_refs) === JSON.stringify(['fresh-art'])
+    ? ok('_resetForTests cleared prior stepOutputs; fresh run derives correctly')
+    : bad(`cleanEditor=${JSON.stringify(cleanEditor)}`);
+  pipeSvc.signalStepTerminal(cleanRunId, 1, 'complete', { produced_artifact_ids: ['done'] });
+  await cleanPromise;
+
   // ---- 13. FanOut happy path: 2 branches, no pre-flight, both complete ----
   console.log('\n[13/19] FanOut (happy path)');
   const foSvc = await importService('services/fan-out-flow.js');
