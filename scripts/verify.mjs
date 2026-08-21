@@ -77,6 +77,17 @@ if (buildCli.status === 0) {
     /^\s*import\s+[^'"]+from\s+/m.test(code)
       ? fail('lib/client.js still contains a top-level `import` — classic-script execution would SyntaxError before __ModuleLoader__.load fires')
       : ok('lib/client.js has no top-level `import` (classic-script safe)');
+    // The DSH static module table exposes `react` as a require-keyed
+    // table word (packages/client/web/src/seed.ts:25-40). Our bundle
+    // factory captures `require('react')` at materialization time and
+    // pins it onto `globalThis.React` so the `ui/_react.js` createElement
+    // shim finds a real React to forward to. Without this pin the shim
+    // falls through to its sentinel branch, the host renders those
+    // sentinels through real React, and the browser throws
+    // "Minified React error #31" for every component.
+    /var\s+React\s*=\s*require\(['"]react['"]\)/.test(code) && /globalThis\.React\s*=\s*React\b/.test(code)
+      ? ok('lib/client.js pins React onto globalThis from require("react") so the createElement shim has a real React to forward to')
+      : fail('lib/client.js does not pin React onto globalThis — components will throw React error #31 when rendered');
     /^\s*export\s+\{[^}]*\}\s*;?\s*$/m.test(code)
       ? fail('lib/client.js still contains a top-level `export { ... }` — the registration never reaches __ModuleLoader__ and client-modules will throw')
       : ok('lib/client.js has no top-level `export` block (CJS exports go through module.exports)');
@@ -123,7 +134,15 @@ if (buildCli.status === 0) {
           ? ok('client bundle hands off a function factory')
           : fail('client bundle hands off a non-function factory (runtime cannot materialize the module)');
         try {
-          const exports = handoff.factory(() => { throw new Error('unexpected require: this bundle declares no seed-word deps') });
+          // The factory's banner captures `require('react')` to pin React
+          // onto globalThis for the createElement shim (see
+          // scripts/build-client.mjs). The verify stub lets that one
+          // seed word through; any other require is unexpected and means
+          // the bundle grew a new external dep.
+          const exports = handoff.factory((spec) => {
+            if (spec === 'react') return { createElement: () => null, useState: () => [null, () => {}], useEffect: () => {} };
+            throw new Error('unexpected require "' + spec + '": this bundle declares no such seed-word dep');
+          });
           const keys = Object.keys(exports ?? {}).sort();
           keys.includes('apply') && keys.includes('inject')
             ? ok('client bundle factory returns { apply, inject } (keys = [' + keys.join(', ') + '])')

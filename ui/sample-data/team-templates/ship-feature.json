@@ -1,0 +1,16 @@
+{
+  "id": "ship-feature",
+  "name": "端到端交付功能",
+  "flow": "pipeline-with-feedback",
+  "flow_config": {
+    "max_rounds": 2,
+    "feedback_enabled": true,
+    "stages": ["design", "implement", "review"]
+  },
+  "members": [
+    { "member_id": "alice", "instance_alias": "research" },
+    { "member_id": "bob", "instance_alias": "backend" },
+    { "member_id": "carol", "instance_alias": "frontend" },
+    { "member_id": "dave", "instance_alias": "review" }
+  ]
+}

@@ -102,11 +102,25 @@ const result = await build({
   // the loader's module table; the body writes to `module.exports`
   // (the CJS exports object) and the factory returns it. esbuild has
   // no `intro` knob, so the module.exports setup goes in the banner.
+  //
+  // Inside the factory body we ALSO pin the React namespace onto
+  // `globalThis.React` so `ui/_react.js`'s `createElement` shim finds
+  // it. DSH's static module table (packages/client/web/src/seed.ts:25-40)
+  // exposes `react` as a require-keyed table word; the factory's
+  // `require('react')` returns the same `import * as React from 'react'`
+  // namespace the first-party TSX components use, so `React.createElement`
+  // / `React.useState` / `React.useEffect` are all available. Without
+  // this pin the shim falls through to its sentinel branch and React
+  // error #31 ("Objects are not valid as a React child (found: object
+  // with keys {__reactEl, type, props, children})") fires for every
+  // component the host renders.
   banner: {
     js: [
       'var module = { exports: {} };',
       'var exports = module.exports;',
       `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {`,
+      'var React = require("react");',
+      'globalThis.React = React;',
     ].join('\n'),
   },
   footer: { js: 'return module.exports; } });' },

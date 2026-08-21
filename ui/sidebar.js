@@ -205,13 +205,77 @@ export function TeamSidebar(props) {
 }
 
 /**
+ * Small icon-button component for the DSH main sidebar foot.
+ *
+ * `sidebar.footer.action` is the seat at the foot of the main DSH
+ * sidebar (the rail that already hosts Settings). Each registrant
+ * contributes a small icon button — see `ui-cordis CordisPanel` for
+ * the model. The host's rail is a flex row of fixed-width buttons
+ * (each ~36px) and our `TeamSidebar` (Active / History / Library
+ * list) is far too wide; that is why we ship a dedicated icon.
+ *
+ * For now the icon is a no-op visible marker so users can see the
+ * plugin is loaded; a future iteration will hook it to open a
+ * `shell.overlay` panel (one entry, position: fixed, toggled by
+ * the icon click). See `registerSidebarSlot` for the
+ * "intentionally not registering" rationale.
+ *
+ * @param {{
+ *   onClick?: (ev: Event) => void,
+ *   title?: string,
+ * }} [_props]
+ */
+export function TeamSidebarFooterIcon(_props) {
+  return h(
+    'button',
+    {
+      type: 'button',
+      className: 'dsh-team-sidebar-icon',
+      'data-component': 'sidebar-icon',
+      'data-action': 'team',
+      title: 'DSH Team (panel coming once data layer lands — see PROGRESS.md §4 留口)',
+      style: {
+        appearance: 'none',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        padding: 0,
+        border: 'none',
+        borderRadius: tokens.radius.md,
+        background: 'transparent',
+        color: tokens.color.text,
+        fontFamily: tokens.font.family,
+        fontSize: tokens.font.size.lg,
+        fontWeight: tokens.font.weight.semibold,
+        cursor: 'pointer',
+      },
+    },
+    // The bullet mark mirrors the brand in the topbar so the icon is
+    // recognisable as ours without committing to a glyph we're not
+    // sure the icon set has on every host platform.
+    h('span', {
+      'data-icon-mark': true,
+      style: {
+        display: 'inline-block',
+        width: 10,
+        height: 10,
+        borderRadius: tokens.radius.pill,
+        background: tokens.color.accent,
+      },
+    }),
+  );
+}
+
+/**
  * Register the Team chrome on the real DSH slots.
  *
  * `sidebar` (kind: single) and `sidebar.workspaces` (kind: single) are
  * both `shadows-shipped-ui` and occupied by `client-ui-sidebar
  * SidebarRoot` / `client-ui-workspace WorkspaceBrowser` — taking them
  * would replace shipped navigation, which is hostile. The clean
- * additive path is two entries on the **real** DSH slots:
+ * additive path is one entry on the **real** DSH slot:
  *
  *   1. `sidebar.footer.action` (kind: list, scope: root) — one icon
  *      beside Settings at the sidebar foot. Catalog reference:
@@ -219,11 +283,10 @@ export function TeamSidebar(props) {
  *      the same seat `client-ui-cordis CordisPanel` takes; the slot is
  *      additive and a fresh `id: 'team'` lands beside the shipped
  *      entry rather than replacing it.
- *   2. `shell.overlay` (kind: list, scope: root) — a full-width,
- *      interactive panel that opens when the icon is clicked. The
- *      overlay is normally click-through, so the panel's own root
- *      opts back into pointer events. Catalog reference:
- *      `cordis-client-runner/src/client/slot-catalog.ts:1437`.
+ *
+ * (The `shell.overlay` 'team-panel' entry from the v1 commit was
+ * removed in this revision — see `registerSidebarSlot` body for the
+ * self-positioning gotcha that caused the take-over bug.)
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
@@ -232,10 +295,14 @@ export function registerSidebarSlot(ctx) {
     ctx?.logger?.warn?.('dsh-team-plugin/ui/sidebar: ctx.slots.inject unavailable; team sidebar skipped');
     return;
   }
-  // The component is a render-only sidebar row (active team list). The
-  // host renders it in the sidebar footer rail. We reuse the same
-  // component for the overlay entry below; the host's seat decides
-  // where the row ends up (icon row vs overlay panel).
+  // `sidebar.footer.action` (kind: list, scope: root) is the additive
+  // seat at the DSH main sidebar foot — the icon-button row that
+  // already hosts Settings. Registrants contribute a small icon (NOT
+  // a full sidebar list) — see `ui-cordis CordisPanel` for the model.
+  // We register a tiny icon button here; a future iteration will hook
+  // it to open a `shell.overlay` panel (one entry, position: fixed,
+  // toggled by the icon click — see ui-cordis's pattern). For now the
+  // icon is a no-op visible marker so users know the plugin is loaded.
   ctx.slots.inject('sidebar.footer.action', () =>
     ctx.slots.register(
       {
@@ -244,22 +311,16 @@ export function registerSidebarSlot(ctx) {
         order: 50,
         label: 'DSH Team',
       },
-      TeamSidebar,
+      TeamSidebarFooterIcon,
     ),
   );
-  // The "open the panel" affordance lives on the same overlay layer;
-  // clicking the team icon in the sidebar foot dispatches a custom
-  // event the overlay entry listens for (handled at runtime by the
-  // shell — this registration is purely the panel surface).
-  ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register(
-      {
-        name: 'shell.overlay',
-        id: 'team-panel',
-        order: 60,
-        label: 'DSH Team Panel',
-      },
-      TeamSidebar,
-    ),
-  );
+  // (intentionally NOT registering a `shell.overlay` entry for
+  // 'team-panel' in this revision: a list-slot `shell.overlay` child
+  // renders inside a `position: absolute; inset: 0` layer and must
+  // self-position (top/bottom) or it stacks on top of the whole page
+  // and covers the DSH home view. The previous revision did this and
+  // the user could not interact with the host. The toggleable panel
+  // pattern (icon → state → conditional render) lives in a follow-up
+  // commit once the data layer (§4 留口 — `WEB_SETTINGS_NAMESPACES` /
+  // typed RPC) lands.)
 }

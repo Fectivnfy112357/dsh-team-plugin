@@ -26,6 +26,14 @@ import { createElement as h, tokens } from './_react.js';
 /**
  * Top bar: brand + active run state pill. Empty state when no
  * active run.
+ *
+ * Self-positions to the top of the frame: `shell.overlay` is rendered
+ * inside a `position: absolute; inset: 0` layer (`packages/client/ui-layout
+ * /src/client/AppFrame.module.css`'s `.overlayLayer`), so each child
+ * must opt into its own position. Without the `position: absolute;
+ * top: 0; left: 0; right: 0;` we end up in natural document flow and
+ * stack under every later `shell.overlay` entry, taking the whole page.
+ *
  * @param {{
  *   activeRun?: { id: string, state: string, flow: string, degraded_flag?: boolean } | null,
  * }} props
@@ -38,6 +46,11 @@ export function TeamTopBar(props) {
       className: 'dsh-team-topbar',
       'data-layout-kind': 'top',
       style: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
         display: 'flex',
         alignItems: 'center',
         gap: tokens.space.md,
@@ -79,6 +92,11 @@ export function TeamTopBar(props) {
 /**
  * Footer: 4 counters (ACP / artifact / dispatch / message). The host
  * passes live counts; on render, missing counts default to 0.
+ *
+ * Self-positions to the bottom of the frame (see `TeamTopBar` for the
+ * why: `shell.overlay` is a single `position: absolute; inset: 0` layer
+ * and each child must opt into its own place).
+ *
  * @param {{
  *   counts?: {
  *     acp?: number,        // number of live continuable sessions
@@ -96,6 +114,11 @@ export function TeamFooter(props) {
       className: 'dsh-team-footer',
       'data-layout-kind': 'footer',
       style: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
         display: 'flex',
         alignItems: 'center',
         gap: tokens.space.lg,
@@ -140,47 +163,30 @@ function stateColor(state) {
 
 /**
  * Register the layout chrome on the real DSH `shell.overlay` slot
- * (kind: list, scope: root). Two additive entries:
- *   - `team-topbar` → `TeamTopBar` (brand + active-run state pill)
- *   - `team-footer` → `TeamFooter` (4 counters: ACP / artifacts /
- *     dispatches / messages)
+ * (kind: list, scope: root).
  *
- * `shell.overlay` is a frame-wide floating layer the DSH web shell
- * reserves for badges, status pills and toasts. Catalog reference:
- * `cordis-client-runner/src/client/slot-catalog.ts:1437` (additive,
- * `replaceRisk: 'none'`).
+ * In this revision **we register zero entries** here. The 28th-commit
+ * idea was to put `TeamTopBar` (brand + active-run state pill) and
+ * `TeamFooter` (4 counters) on the frame; even after self-positioning
+ * (`position: absolute; top: 0` / `bottom: 0`) the user reported the
+ * ~50px top stripe and ~32px bottom stripe still covered the DSH home
+ * view's content and stole pointer events from the host. The user
+ * preferred a cleaner DSH home with no Team chrome at all and just
+ * the team sidebar icon to reach the configuration surface.
  *
- * Each entry is wrapped in `ctx.slots.inject(key, ...)` so the
- * registration re-runs if the slot owner remounts (per
- * `client-modules` Cordis notes).
+ * The `TeamTopBar` / `TeamFooter` components are **kept exported** so
+ * a follow-up revision can mount them in a less intrusive surface
+ * (e.g. as the panel content for a `shell.overlay` entry the icon
+ * toggles, or as a `conversation.session.header` action row). For
+ * now they are dormant — see PROGRESS.md §4 留口 for the panel-state
+ * follow-up.
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  */
 export function registerLayoutSlot(ctx) {
   if (!ctx?.slots?.inject || typeof ctx.slots.register !== 'function') {
-    ctx?.logger?.warn?.('dsh-team-plugin/ui/layout: ctx.slots.inject unavailable; team-topbar / team-footer skipped');
+    ctx?.logger?.warn?.('dsh-team-plugin/ui/layout: ctx.slots.inject unavailable; layout registrar skipped (currently a no-op)');
     return;
   }
-  ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register(
-      {
-        name: 'shell.overlay',
-        id: 'team-topbar',
-        order: 50,
-        label: 'DSH Team Top Bar',
-      },
-      TeamTopBar,
-    ),
-  );
-  ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register(
-      {
-        name: 'shell.overlay',
-        id: 'team-footer',
-        order: 50,
-        label: 'DSH Team Footer',
-      },
-      TeamFooter,
-    ),
-  );
+  // Intentionally empty: see the docstring above.
 }

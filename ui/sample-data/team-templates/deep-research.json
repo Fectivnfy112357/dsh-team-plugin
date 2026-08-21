@@ -1,0 +1,14 @@
+{
+  "id": "deep-research",
+  "name": "深度调研",
+  "flow": "handoff-round-table",
+  "flow_config": {
+    "max_rounds": 3,
+    "ad_hoc_decision_points": true,
+    "termination": "all_members_pass_or_max_rounds"
+  },
+  "members": [
+    { "member_id": "alice", "instance_alias": "researcher-1" },
+    { "member_id": "eve", "instance_alias": "writer-1" }
+  ]
+}

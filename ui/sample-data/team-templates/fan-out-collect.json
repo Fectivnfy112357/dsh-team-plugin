@@ -1,0 +1,16 @@
+{
+  "id": "fan-out-collect",
+  "name": "并行研究 + 汇总",
+  "flow": "fan-out-collect",
+  "flow_config": {
+    "parallelism": 3,
+    "aggregator_id": "eve",
+    "timeout_ms": 600000
+  },
+  "members": [
+    { "member_id": "alice", "instance_alias": "researcher-a" },
+    { "member_id": "alice", "instance_alias": "researcher-b" },
+    { "member_id": "alice", "instance_alias": "researcher-c" },
+    { "member_id": "eve", "instance_alias": "aggregator" }
+  ]
+}
