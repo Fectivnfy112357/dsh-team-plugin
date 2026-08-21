@@ -173,13 +173,14 @@ export function registerToolSlot(ctx) {
   }
   for (const toolName of TEAM_TOOL_NAMES) {
     ctx.slots.inject('tool.call.toolview', () =>
-      ctx.slots.register({
-        name: 'tool.call.toolview',
-        kind: 'keyed',
-        key: toolName,
-        component: TeamToolCall,
-        label: `DSH Team Tool: ${toolName}`,
-      }),
+      ctx.slots.register(
+        {
+          name: 'tool.call.toolview',
+          key: toolName,
+          label: `DSH Team Tool: ${toolName}`,
+        },
+        TeamToolCall,
+      ),
     );
   }
 }

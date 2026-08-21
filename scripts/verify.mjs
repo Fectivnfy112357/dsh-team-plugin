@@ -141,6 +141,97 @@ if (buildCli.status === 0) {
   }
 }
 
+// Slot-registration shape check — catch the systematic
+// `ctx.slots.register({...with kind/component/props}, missing-2nd-arg)`
+// regression that hid every team UI surface from DSH's slot renderer
+// (the entry registered in the ledger so the nav row appeared, but
+// `entry.component` was `undefined` so the body rendered nothing —
+// see PROGRESS.md 26th-commit note).
+//
+// DSH's @deepseek-ai/dsh-client-ui-slots#register signature is
+// `register(options, component)` where options is restricted to
+// { id, key, order, label, priority, inject, children, store, locale,
+// registrant } and `kind` / `component` / `props` are silently dropped.
+// We scan the source files (not the bundled lib/client.js) so a
+// regression is caught at the editor boundary, before the build step.
+{
+  const slotRegistrars = [
+    'ui/team-panel.js',
+    'ui/layout.js',
+    'ui/sidebar.js',
+    'ui/conversation.js',
+    'ui/tool.js',
+  ];
+  let totalCallSites = 0;
+  for (const rel of slotRegistrars) {
+    const file = join(root, rel);
+    if (!existsSync(file)) { warn(`${rel} missing — slot-registration shape check skipped`); continue; }
+    const code = readFileSync(file, 'utf8');
+    // Match every `ctx.slots.register(` call site (multi-line OK). The
+    // outer capture grabs everything until the matching close-paren
+    // by counting nesting; a regex-only match would over/under-grep
+    // on nested braces. We do a small bracket-balance scan instead.
+    const sites = [];
+    let i = 0;
+    while ((i = code.indexOf('ctx.slots.register(', i)) !== -1) {
+      const start = i;
+      i += 'ctx.slots.register('.length;
+      let depth = 1;
+      while (i < code.length && depth > 0) {
+        const ch = code[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        i++;
+      }
+      sites.push({ start, end: i, body: code.slice(start, i) });
+    }
+    if (sites.length === 0) { warn(`${rel} contains no ctx.slots.register call sites`); continue; }
+    totalCallSites += sites.length;
+    for (const { body } of sites) {
+      // Strip the `ctx.slots.register(` prefix and the trailing `)`.
+      const inner = body.slice('ctx.slots.register('.length, -1).trim();
+      // Split the args at the top-level comma (only the FIRST one,
+      // because DSH's signature has exactly two args: options, component).
+      let depth2 = 0;
+      let splitAt = -1;
+      for (let k = 0; k < inner.length; k++) {
+        const ch = inner[k];
+        if (ch === '(' || ch === '[' || ch === '{') depth2++;
+        else if (ch === ')' || ch === ']' || ch === '}') depth2--;
+        else if (ch === ',' && depth2 === 0) { splitAt = k; break; }
+      }
+      if (splitAt < 0) {
+        fail(`${rel}: ctx.slots.register called with a single argument — DSH signature is (options, component); component must be the 2nd arg. body = ${body.slice(0, 80)}…`);
+        continue;
+      }
+      const optionsSrc = inner.slice(0, splitAt).trim();
+      const componentSrc = inner.slice(splitAt + 1).trim();
+      if (!optionsSrc.startsWith('{') || !optionsSrc.endsWith('}')) {
+        fail(`${rel}: ctx.slots.register 1st arg is not an inline options object; expected {…}, 2nd arg component. body = ${body.slice(0, 80)}…`);
+        continue;
+      }
+      if (componentSrc.length === 0) {
+        fail(`${rel}: ctx.slots.register 2nd arg (component) is empty — the entry will render nothing. body = ${body.slice(0, 80)}…`);
+        continue;
+      }
+      // Inspect the options object body for the three Cordis-style keys
+      // that DSH silently drops.
+      const dropped = [];
+      if (/\bkind\s*:/.test(optionsSrc)) dropped.push('kind');
+      if (/\bcomponent\s*:/.test(optionsSrc)) dropped.push('component');
+      if (/\bprops\s*:/.test(optionsSrc)) dropped.push('props');
+      if (dropped.length > 0) {
+        fail(`${rel}: ctx.slots.register options contains [${dropped.join(', ')}] — DSH silently drops these (not in the filtered options whitelist). Move \`component\` to the 2nd arg and drop the others. body = ${body.slice(0, 120)}…`);
+      }
+    }
+  }
+  if (totalCallSites > 0) {
+    ok(`scanned ${totalCallSites} ctx.slots.register call site(s) across 5 registrar files — all use DSH (options, component) shape, no Cordis-style fields inside options`);
+  } else {
+    warn('no slot-registration call sites found across ui/team-panel.js + ui/layout.js + ui/sidebar.js + ui/conversation.js + ui/tool.js');
+  }
+}
+
 // ---- 1. critical paths ----
 console.log('\n[1/5] critical paths');
 for (const f of ['package.json', 'plugin.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'src/client.js', 'scripts/build-client.mjs']) {

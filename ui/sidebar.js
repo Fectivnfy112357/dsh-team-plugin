@@ -237,27 +237,29 @@ export function registerSidebarSlot(ctx) {
   // component for the overlay entry below; the host's seat decides
   // where the row ends up (icon row vs overlay panel).
   ctx.slots.inject('sidebar.footer.action', () =>
-    ctx.slots.register({
-      name: 'sidebar.footer.action',
-      kind: 'list',
-      id: 'team',
-      order: 50,
-      component: TeamSidebar,
-      label: 'DSH Team',
-    }),
+    ctx.slots.register(
+      {
+        name: 'sidebar.footer.action',
+        id: 'team',
+        order: 50,
+        label: 'DSH Team',
+      },
+      TeamSidebar,
+    ),
   );
   // The "open the panel" affordance lives on the same overlay layer;
   // clicking the team icon in the sidebar foot dispatches a custom
   // event the overlay entry listens for (handled at runtime by the
   // shell — this registration is purely the panel surface).
   ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register({
-      name: 'shell.overlay',
-      kind: 'list',
-      id: 'team-panel',
-      order: 60,
-      component: TeamSidebar,
-      label: 'DSH Team Panel',
-    }),
+    ctx.slots.register(
+      {
+        name: 'shell.overlay',
+        id: 'team-panel',
+        order: 60,
+        label: 'DSH Team Panel',
+      },
+      TeamSidebar,
+    ),
   );
 }

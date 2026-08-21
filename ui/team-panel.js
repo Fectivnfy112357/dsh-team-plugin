@@ -30,11 +30,12 @@ import { TeamHandoffCard } from './team-handoff-card.js';
 import { TeamHandoffRedo } from './team-handoff-redo.js';
 import { TeamPlan, loadPlan } from './team-plan.js';
 import { TeamConfigPanel } from './team-config.js';
+import { TeamConfigPanelHost } from './team-config-host.js';
 
 // Re-export the plan component + loader so host slots and tests can
 // reach them without re-importing './team-plan.js' (the panel is the
 // single import surface for the lib/index.js slot registration path).
-export { TeamPlan, loadPlan, TeamConfigPanel };
+export { TeamPlan, loadPlan, TeamConfigPanel, TeamConfigPanelHost };
 
 /**
  * Subscribe to live decision-point changes emitted on the ctx event
@@ -266,15 +267,33 @@ export function registerTeamSlots(ctx) {
     ctx?.logger?.warn?.('dsh-team-plugin/ui/team-panel: ctx.slots.inject unavailable; team settings section skipped');
     return;
   }
+  // Per @deepseek-ai/dsh-client-ui-slots#register: component is the 2nd arg,
+  // not a field inside options. DSH filters options to { id, order, label,
+  // priority, inject, children, store, locale, registrant } only; everything
+  // else (including the old Cordis-style `kind` / `component` / `props`) is
+  // silently dropped — which is why a previous revision showed the "Team" nav
+  // row but an empty panel (the entry had no component to render). See
+  // PROGRESS.md 26th-commit note for the regression history.
+  //
+  // The `team-config` slot bound to `TeamConfigPanelHost` is the DSH-side
+  // adapter (`ui/team-config-host.js`) that turns runtime props into the
+  // static-prop shape `TeamConfigPanel` was built for. It supplies no-op
+  // callbacks to skip the "Loading configuration…" branch so the form
+  // actually renders — submit/delete are no-ops because the data layer
+  // (settings doc via `ctx.settingsScope` OR host-side `team.*` tool
+  // dispatch) is on PROGRESS.md §4 留口: both paths need DSH host code
+  // changes (`packages/host/apiproxy/src/api-proxy.ts:126-128`
+  // `WEB_SETTINGS_NAMESPACES` allowlist for the first; a typed RPC for
+  // the second) that we cannot do from a plugin.
   ctx.slots.inject('settings.section', () =>
-    ctx.slots.register({
-      name: 'settings.section',
-      kind: 'list',
-      id: 'team',
-      order: 100,
-      label: 'Team',
-      component: TeamConfigPanel,
-      props: { sectionId: 'dsh-team', title: 'DSH Team Plugin' },
-    }),
+    ctx.slots.register(
+      {
+        name: 'settings.section',
+        id: 'team',
+        order: 100,
+        label: 'Team',
+      },
+      TeamConfigPanelHost,
+    ),
   );
 }

@@ -172,13 +172,14 @@ export function registerConversationSlot(ctx) {
     return;
   }
   ctx.slots.inject('conversation.view', () =>
-    ctx.slots.register({
-      name: 'conversation.view',
-      kind: 'list',
-      id: 'team-timeline',
-      order: 100,
-      label: 'Team',
-      component: ConversationTimeline,
-    }),
+    ctx.slots.register(
+      {
+        name: 'conversation.view',
+        id: 'team-timeline',
+        order: 100,
+        label: 'Team',
+      },
+      ConversationTimeline,
+    ),
   );
 }

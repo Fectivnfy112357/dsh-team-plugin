@@ -162,23 +162,25 @@ export function registerLayoutSlot(ctx) {
     return;
   }
   ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register({
-      name: 'shell.overlay',
-      kind: 'list',
-      id: 'team-topbar',
-      order: 50,
-      component: TeamTopBar,
-      label: 'DSH Team Top Bar',
-    }),
+    ctx.slots.register(
+      {
+        name: 'shell.overlay',
+        id: 'team-topbar',
+        order: 50,
+        label: 'DSH Team Top Bar',
+      },
+      TeamTopBar,
+    ),
   );
   ctx.slots.inject('shell.overlay', () =>
-    ctx.slots.register({
-      name: 'shell.overlay',
-      kind: 'list',
-      id: 'team-footer',
-      order: 50,
-      component: TeamFooter,
-      label: 'DSH Team Footer',
-    }),
+    ctx.slots.register(
+      {
+        name: 'shell.overlay',
+        id: 'team-footer',
+        order: 50,
+        label: 'DSH Team Footer',
+      },
+      TeamFooter,
+    ),
   );
 }
